@@ -1,0 +1,155 @@
+{
+   "manifest_browser_action": {
+      "message": "FetchV"
+   },
+   "manifest_description": {
+      "message": "Pemuat turun video untuk menyimpan video web dan siaran langsung."
+   },
+   "manifest_name": {
+      "message": "FetchV - Pemuat turun video m3u8/hls"
+   },
+   "modal_record": {
+      "message": "Rakaman"
+   },
+   "modal_record_end": {
+      "message": "Tamat"
+   },
+   "modal_record_start": {
+      "message": "Mula"
+   },
+   "popup_disable": {
+      "message": "Maaf, kami tidak dapat memuat turun video di halaman ini untuk anda."
+   },
+   "popup_disable_detail": {
+      "message": "Ketahui lebih lanjut"
+   },
+   "popup_home": {
+      "message": "Utama"
+   },
+   "popup_inject_capture_no_video": {
+      "message": "Tiada video yang tersedia dijumpai!"
+   },
+   "popup_inject_capture_off": {
+      "message": "Tangkapan berasaskan kandungan telah diaktifkan untuk laman ini"
+   },
+   "popup_inject_capture_on": {
+      "message": "Aktifkan tangkapan berasaskan kandungan untuk laman ini"
+   },
+   "popup_inject_capture_tooltip": {
+      "message": "Sesetengah jenis senarai main m3u8 yang khas mungkin tidak dapat dikesan secara automatik! Mengaktifkan pilihan ini membolehkan ia dikesan daripada kandungan laman (jika ada). Nota: Jangan aktifkan pilihan ini dalam keadaan biasa kerana ia mungkin menggunakan lebih banyak sumber!"
+   },
+   "popup_item_block": {
+      "message": "Sekat semua sumber dari domain ini"
+   },
+   "popup_item_block_error": {
+      "message": "Hanya boleh mengeblok maksimum 30 domain!"
+   },
+   "popup_item_block_modal_btn_confirm": {
+      "message": "Sahkan"
+   },
+   "popup_item_block_modal_content": {
+      "message": "Adakah anda pasti untuk mengeblok semua sumber dari domain ini? Selepas ditekan, anda boleh menguruskan pilihan ini di tetapan."
+   },
+   "popup_item_block_modal_title": {
+      "message": "Mengeblok Domain Ini"
+   },
+   "popup_item_block_success": {
+      "message": "Berjaya mengeblok domain ini!"
+   },
+   "popup_item_copy": {
+      "message": "Salin Pautan"
+   },
+   "popup_item_copy_error": {
+      "message": "Gagal disalin!"
+   },
+   "popup_item_copy_success": {
+      "message": "Berjaya disalin!"
+   },
+   "popup_item_download": {
+      "message": "Muat Turun"
+   },
+   "popup_item_play": {
+      "message": "Pratonton Main"
+   },
+   "popup_no_resource": {
+      "message": "Tiada sumber"
+   },
+   "popup_no_resource_bottom": {
+      "message": "Jika media sasaran anda tidak tersenarai atau gagal dimuat turun, sila cuba penyelesaian berikut."
+   },
+   "popup_no_resource_lead": {
+      "message": "Sesetengah video mungkin perlu dimainkan dahulu sebelum ia dapat dikesan. Jika sumber masih tidak dapat dikesan selepas dimainkan, sila cuba kaedah berikut."
+   },
+   "popup_option": {
+      "message": "Tetapan"
+   },
+   "popup_option_block": {
+      "message": "Sekat Domain"
+   },
+   "popup_option_block_empty": {
+      "message": "Tiada domain yang ditekan"
+   },
+   "popup_option_setup_success": {
+      "message": "Tetapan berjaya disimpan!"
+   },
+   "popup_option_size": {
+      "message": "Penapis Saiz"
+   },
+   "popup_option_size_max": {
+      "message": "Had Atas"
+   },
+   "popup_option_size_min": {
+      "message": "Had Bawah"
+   },
+   "popup_option_size_tooltip": {
+      "message": "Sumber dengan saiz di bawah had bawah atau melebihi had atas tidak akan dirakam. Unit: KB, tetapkan 0 untuk tiada had."
+   },
+   "popup_option_tip": {
+      "message": "Petunjuk Tetapan"
+   },
+   "popup_option_tip_block": {
+      "message": "Paparkan petunjuk semasa mengeblok domain"
+   },
+   "popup_option_tooltip": {
+      "message": "Sumber dari domain berikut tidak akan dirakam."
+   },
+   "popup_play_tip": {
+      "message": "Beberapa video mungkin tidak dapat dirakam jika tidak diputar."
+   },
+   "popup_record": {
+      "message": "Rakam"
+   },
+   "popup_record_mode": {
+      "message": "Mod Rakaman"
+   },
+   "popup_record_mode_default": {
+      "message": "Tetapkan sebagai Mod Asal"
+   },
+   "popup_record_mode_default_tooltip": {
+      "message": "Apabila merekod video di laman web ini pada masa akan datang, mod yang dipilih di atas akan digunakan secara lalai."
+   },
+   "popup_record_mode_error_tips": {
+      "message": "Sila pilih mod rakaman"
+   },
+   "popup_record_mode_mse": {
+      "message": "MSE (Mod Penimbal)"
+   },
+   "popup_record_mode_mse_tooltip": {
+      "message": "Merekod penimbal pemain. Kelebihannya ialah anda boleh mempercepatkan proses rakaman dengan mempercepatkan main balik dan melangkau segmen penimbal. Kelemahannya ialah keserasian yang lebih rendah, dan ia mungkin tidak dapat mengendalikan aliran media dengan struktur khas dengan betul."
+   },
+   "popup_record_mode_msr": {
+      "message": "MSR (Mod Rakaman Skrin)"
+   },
+   "popup_record_mode_msr_tooltip": {
+      "message": "Merekod skrin dan bunyi pemain. Ia mempunyai keserasian yang lebih baik daripada MSE, tetapi kelemahannya ialah anda tidak boleh mempercepatkan proses rakaman dengan mempercepatkan main balik atau melangkau segmen penimbal. Ia disyorkan untuk strim langsung dan video yang tidak boleh dirakam menggunakan MSE."
+   },
+   "popup_record_mode_switch_tooltip": {
+      "message": "Tukar Mod"
+   },
+   "popup_record_no_media_tips": {
+      "message": "Tiada video yang boleh dirakam dikesan. Jika video wujud dan boleh dimainkan, sila periksa sama ada video disenyapkan dan nyahsenyapkan!"
+   },
+   "popup_record_start": {
+      "message": "Mula Merekod"
+   }
+}

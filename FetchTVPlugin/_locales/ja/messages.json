@@ -1,0 +1,155 @@
+{
+   "manifest_browser_action": {
+      "message": "FetchV"
+   },
+   "manifest_description": {
+      "message": "ストリーミング動画（HLS/M3U8形式）やMP4・WebM動画を検出して保存！再生中の動画をワンクリックでダウンロード可能な動画保存ツールです。"
+   },
+   "manifest_name": {
+      "message": "FetchV / HLS・M3U8対応 動画ゲッター"
+   },
+   "modal_record": {
+      "message": "録画"
+   },
+   "modal_record_end": {
+      "message": "終了"
+   },
+   "modal_record_start": {
+      "message": "開始"
+   },
+   "popup_disable": {
+      "message": "申し訳ありませんが、このページからビデオをダウンロードすることはできません。"
+   },
+   "popup_disable_detail": {
+      "message": "詳細を見る"
+   },
+   "popup_home": {
+      "message": "ホーム"
+   },
+   "popup_inject_capture_no_video": {
+      "message": "利用可能な動画が見つかりませんでした！"
+   },
+   "popup_inject_capture_off": {
+      "message": "このサイトではコンテンツベースのキャプチャが有効です"
+   },
+   "popup_inject_capture_on": {
+      "message": "このサイトでコンテンツベースのキャプチャを有効にする"
+   },
+   "popup_inject_capture_tooltip": {
+      "message": "特定の種類の m3u8 プレイリストは自動的に検出できない場合があります。このオプションを有効にすると、ページ内容から検出できる可能性があります（存在する場合）。注意：このオプションが機能しない場合は、システム リソースの消費を避けるためにオフにしてください。"
+   },
+   "popup_item_block": {
+      "message": "このドメインからのすべてのリソースをフィルター"
+   },
+   "popup_item_block_error": {
+      "message": "ブロックできるドメインは30件までです!"
+   },
+   "popup_item_block_modal_btn_confirm": {
+      "message": "確認"
+   },
+   "popup_item_block_modal_content": {
+      "message": "このドメインからのすべてのリソースをブロックしてもよろしいですか? ブロックした後は設定で管理できます。"
+   },
+   "popup_item_block_modal_title": {
+      "message": "ドメインをブロック"
+   },
+   "popup_item_block_success": {
+      "message": "ドメインをブロックしました!"
+   },
+   "popup_item_copy": {
+      "message": "リンクをコピー"
+   },
+   "popup_item_copy_error": {
+      "message": "コピーに失敗しました!"
+   },
+   "popup_item_copy_success": {
+      "message": "正常にコピーしました!"
+   },
+   "popup_item_download": {
+      "message": "ダウンロード"
+   },
+   "popup_item_play": {
+      "message": "プレビューを再生"
+   },
+   "popup_no_resource": {
+      "message": "リソースがありません"
+   },
+   "popup_no_resource_bottom": {
+      "message": "目的のメディアがリストに表示されない、またはダウンロードに失敗する場合は、次の方法を試してください。"
+   },
+   "popup_no_resource_lead": {
+      "message": "一部の動画は、再生を開始しないと検出できない場合があります。再生後も検出されない場合は、以下の方法をお試しください。"
+   },
+   "popup_option": {
+      "message": "設定"
+   },
+   "popup_option_block": {
+      "message": "ドメインをブロック"
+   },
+   "popup_option_block_empty": {
+      "message": "ブロックしたドメインはありません"
+   },
+   "popup_option_setup_success": {
+      "message": "設定を正常に保存しました!"
+   },
+   "popup_option_size": {
+      "message": "サイズフィルター"
+   },
+   "popup_option_size_max": {
+      "message": "上限"
+   },
+   "popup_option_size_min": {
+      "message": "下限"
+   },
+   "popup_option_size_tooltip": {
+      "message": "下限以下または上限以上のサイズのリソースはキャプチャされません。単位はKBです。制限なしの場合は0に設定します。"
+   },
+   "popup_option_tip": {
+      "message": "ヒント設定"
+   },
+   "popup_option_tip_block": {
+      "message": "ドメインをブロックするときにヒントを表示する"
+   },
+   "popup_option_tooltip": {
+      "message": "以下のドメインからのリソースはキャプチャされません"
+   },
+   "popup_play_tip": {
+      "message": "ビデオを再生しないと、キャプチャできない場合があります。"
+   },
+   "popup_record": {
+      "message": "記録"
+   },
+   "popup_record_mode": {
+      "message": "録画方法"
+   },
+   "popup_record_mode_default": {
+      "message": "デフォルトモードに設定"
+   },
+   "popup_record_mode_default_tooltip": {
+      "message": "次回このウェブサイトの動画を録画する際、上記で選択したモードがデフォルトで使用されます。"
+   },
+   "popup_record_mode_error_tips": {
+      "message": "録画方法を選択してください"
+   },
+   "popup_record_mode_mse": {
+      "message": "MSE（バッファモード）"
+   },
+   "popup_record_mode_mse_tooltip": {
+      "message": "プレイヤーのバッファを録画します。倍速再生やバッファジャンプによる録画速度の向上が可能という利点がありますが、互換性が低く、特殊な構造のメディアストリームを正常に処理できない可能性があります。"
+   },
+   "popup_record_mode_msr": {
+      "message": "MSR（画面録画モード）"
+   },
+   "popup_record_mode_msr_tooltip": {
+      "message": "プレイヤーの画面と音声を録画します。MSEよりも互換性が良いですが、倍速再生やバッファジャンプによる録画速度の向上ができないという欠点があります。ライブストリーミングやMSEで録画できない動画に使用することをお勧めします。"
+   },
+   "popup_record_mode_switch_tooltip": {
+      "message": "モードを切り替える"
+   },
+   "popup_record_no_media_tips": {
+      "message": "録画可能な動画が検出されません。動画が存在し、再生可能である場合は、動画がミュートになっていないか確認し、ミュートを解除してください。"
+   },
+   "popup_record_start": {
+      "message": "録画を開始"
+   }
+}

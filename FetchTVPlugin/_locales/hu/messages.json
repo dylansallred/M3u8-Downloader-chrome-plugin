@@ -1,0 +1,155 @@
+{
+   "manifest_browser_action": {
+      "message": "FetchV"
+   },
+   "manifest_description": {
+      "message": "A videóletöltő webes videók és élő közvetítések mentéséhez."
+   },
+   "manifest_name": {
+      "message": "FetchV - m3u8/hls videó letöltő"
+   },
+   "modal_record": {
+      "message": "Felvétel"
+   },
+   "modal_record_end": {
+      "message": "Befejezés"
+   },
+   "modal_record_start": {
+      "message": "Indítás"
+   },
+   "popup_disable": {
+      "message": "Sajnáljuk, nem tudjuk letölteni a weboldal videóit."
+   },
+   "popup_disable_detail": {
+      "message": "További részletek"
+   },
+   "popup_home": {
+      "message": "Főoldal"
+   },
+   "popup_inject_capture_no_video": {
+      "message": "Nem található elérhető videó!"
+   },
+   "popup_inject_capture_off": {
+      "message": "Tartalomalapú rögzítés engedélyezve ezen az oldalon"
+   },
+   "popup_inject_capture_on": {
+      "message": "Tartalomalapú rögzítés engedélyezése ezen az oldalon"
+   },
+   "popup_inject_capture_tooltip": {
+      "message": "Bizonyos speciális m3u8 lejátszási listák nem feltétlenül észlelhetők automatikusan! Ennek az opciónak az engedélyezésével a tartalom alapján is felismerhetők (ha elérhetők). Megjegyzés: Normál esetben ne engedélyezze ezt az opciót, mert több erőforrást használhat!"
+   },
+   "popup_item_block": {
+      "message": "Az összes forrás letiltása ettől a domain-tól"
+   },
+   "popup_item_block_error": {
+      "message": "Legfeljebb 30 domain letiltása lehetséges!"
+   },
+   "popup_item_block_modal_btn_confirm": {
+      "message": "Megerősítés"
+   },
+   "popup_item_block_modal_content": {
+      "message": "Biztosan letiltod az összes erről a domain-ről származó erőforrást? A letiltás után később a beállításokban kezelheted ezt az opciót."
+   },
+   "popup_item_block_modal_title": {
+      "message": "Domain letiltása"
+   },
+   "popup_item_block_success": {
+      "message": "A domain sikeresen letiltva!"
+   },
+   "popup_item_copy": {
+      "message": "Link másolása"
+   },
+   "popup_item_copy_error": {
+      "message": "Másolás sikertelen!"
+   },
+   "popup_item_copy_success": {
+      "message": "Sikeres másolás!"
+   },
+   "popup_item_download": {
+      "message": "Letöltés"
+   },
+   "popup_item_play": {
+      "message": "Előnézeti lejátszás"
+   },
+   "popup_no_resource": {
+      "message": "Nincs elérhető erőforrás"
+   },
+   "popup_no_resource_bottom": {
+      "message": "Ha a keresett média nem szerepel a listában, vagy a letöltés sikertelen, próbálkozzon az alábbi lehetőségekkel."
+   },
+   "popup_no_resource_lead": {
+      "message": "Egyes videókat először le kell játszani, mielőtt felismerhetők lennének. Ha a lejátszás után sem sikerül észlelni az erőforrást, próbálja ki az alábbi módszereket."
+   },
+   "popup_option": {
+      "message": "Beállítás"
+   },
+   "popup_option_block": {
+      "message": "Domain letiltás"
+   },
+   "popup_option_block_empty": {
+      "message": "Nincs letiltott domain"
+   },
+   "popup_option_setup_success": {
+      "message": "Beállítás sikeresen mentve!"
+   },
+   "popup_option_size": {
+      "message": "Méret szűrés"
+   },
+   "popup_option_size_max": {
+      "message": "Felső korlát"
+   },
+   "popup_option_size_min": {
+      "message": "Alsó korlát"
+   },
+   "popup_option_size_tooltip": {
+      "message": "A megadott méretnél kisebb vagy nagyobb méretű erőforrások nem lesznek letöltve. Mértékegység: KB, 0 jelenti a korlátozás hiányát."
+   },
+   "popup_option_tip": {
+      "message": "Tipp beállítás"
+   },
+   "popup_option_tip_block": {
+      "message": "Az erőforrás letiltásakor jelenjen meg tipp"
+   },
+   "popup_option_tooltip": {
+      "message": "Az alábbi domainekről származó erőforrások nem lesznek letöltve."
+   },
+   "popup_play_tip": {
+      "message": "Néhány videó csak akkor fog letölthetővé válni, ha lejátsszák."
+   },
+   "popup_record": {
+      "message": "Felvétel"
+   },
+   "popup_record_mode": {
+      "message": "Felvételi mód"
+   },
+   "popup_record_mode_default": {
+      "message": "Beállítás alapértelmezett módként"
+   },
+   "popup_record_mode_default_tooltip": {
+      "message": "Amikor legközelebb felvesz videókat ezen a webhelyen, a fenti mód lesz az alapértelmezett."
+   },
+   "popup_record_mode_error_tips": {
+      "message": "Kérjük, válassza ki a felvételi módot"
+   },
+   "popup_record_mode_mse": {
+      "message": "MSE (Puffer mód)"
+   },
+   "popup_record_mode_mse_tooltip": {
+      "message": "Felveszi a lejátszó pufferét. Előnye, hogy felgyorsíthatja a felvételi folyamatot a lejátszás gyorsításával és a puffer szegmensek átugrásával. Hátránya a rosszabb kompatibilitás, és előfordulhat, hogy nem tudja megfelelően kezelni a speciális szerkezetű médiafolyamokat."
+   },
+   "popup_record_mode_msr": {
+      "message": "MSR (Képernyőfelvételi mód)"
+   },
+   "popup_record_mode_msr_tooltip": {
+      "message": "Felveszi a lejátszó képernyőjét és hangját. Jobb a kompatibilitása, mint az MSE-nek, de hátránya, hogy a felvételi folyamatot nem tudja felgyorsítani a lejátszás gyorsításával vagy a puffer szegmensek átugrásával. Élő közvetítésekhez és olyan videókhoz ajánlott, amelyeket az MSE-vel nem lehet felvenni."
+   },
+   "popup_record_mode_switch_tooltip": {
+      "message": "Mód váltása"
+   },
+   "popup_record_no_media_tips": {
+      "message": "Nem található felvehető videó. Ha a videó létezik és lejátszható, ellenőrizze, hogy a videó nincs-e némítva, és kapcsolja ki a némítást!"
+   },
+   "popup_record_start": {
+      "message": "Felvétel indítása"
+   }
+}

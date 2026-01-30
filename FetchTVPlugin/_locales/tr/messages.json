@@ -1,0 +1,155 @@
+{
+   "manifest_browser_action": {
+      "message": "FetchV"
+   },
+   "manifest_description": {
+      "message": "Web videolarını ve canlı yayınları kaydetmek için video indirici."
+   },
+   "manifest_name": {
+      "message": "FetchV - m3u8/hls Video İndirici"
+   },
+   "modal_record": {
+      "message": "Kaydet"
+   },
+   "modal_record_end": {
+      "message": "Son"
+   },
+   "modal_record_start": {
+      "message": "Başlat"
+   },
+   "popup_disable": {
+      "message": "Üzgünüz, bu sayfadan videoları indiremiyoruz."
+   },
+   "popup_disable_detail": {
+      "message": "Daha Fazla Bilgi"
+   },
+   "popup_home": {
+      "message": "Ana Sayfa"
+   },
+   "popup_inject_capture_no_video": {
+      "message": "Kullanılabilir video bulunamadı!"
+   },
+   "popup_inject_capture_off": {
+      "message": "Bu site için içerik tabanlı yakalama etkinleştirildi"
+   },
+   "popup_inject_capture_on": {
+      "message": "Bu site için içerik tabanlı yakalamayı etkinleştir"
+   },
+   "popup_inject_capture_tooltip": {
+      "message": "Bazı özel m3u8 oynatma listeleri otomatik olarak algılanamayabilir! Bu seçeneği etkinleştirmek, varsa sayfa içeriğinden algılanmalarını sağlar. Not: Normal durumlarda bu seçeneği etkinleştirmeyin, çünkü daha fazla kaynak kullanabilir!"
+   },
+   "popup_item_block": {
+      "message": "Bu etki alanından tüm kaynakları engelle"
+   },
+   "popup_item_block_error": {
+      "message": "En fazla 30 etki alanı engelleyebilirsiniz!"
+   },
+   "popup_item_block_modal_btn_confirm": {
+      "message": "Onayla"
+   },
+   "popup_item_block_modal_content": {
+      "message": "Bu etki alanından gelen tüm kaynakları engellemek istediğinize emin misiniz? Engelledikten sonra bu seçeneği ayarlardan yönetebilirsiniz."
+   },
+   "popup_item_block_modal_title": {
+      "message": "Etki Alanını Engelle"
+   },
+   "popup_item_block_success": {
+      "message": "Etki alanı engellendi!"
+   },
+   "popup_item_copy": {
+      "message": "Bağlantıyı Kopyala"
+   },
+   "popup_item_copy_error": {
+      "message": "Kopyalanamadı!"
+   },
+   "popup_item_copy_success": {
+      "message": "Kopyalandı!"
+   },
+   "popup_item_download": {
+      "message": "İndir"
+   },
+   "popup_item_play": {
+      "message": "Önizlemeyi Oynat"
+   },
+   "popup_no_resource": {
+      "message": "Uygun kaynak bulunamadı"
+   },
+   "popup_no_resource_bottom": {
+      "message": "Hedef medyanız listede yoksa veya indirme başarısız olduysa, aşağıdaki çözümleri deneyin."
+   },
+   "popup_no_resource_lead": {
+      "message": "Bazı videoların algılanabilmesi için önce oynatılması gerekebilir. Oynatıldıktan sonra kaynak hâlâ yakalanamıyorsa, aşağıdaki yöntemleri deneyin."
+   },
+   "popup_option": {
+      "message": "Ayarlar"
+   },
+   "popup_option_block": {
+      "message": "Etki Alanını Engelle"
+   },
+   "popup_option_block_empty": {
+      "message": "Engellenmiş alan yok"
+   },
+   "popup_option_setup_success": {
+      "message": "Ayarlar kaydedildi!"
+   },
+   "popup_option_size": {
+      "message": "Boyut Filtresi"
+   },
+   "popup_option_size_max": {
+      "message": "Üst Sınır"
+   },
+   "popup_option_size_min": {
+      "message": "Alt Sınır"
+   },
+   "popup_option_size_tooltip": {
+      "message": "Alt sınırın altında veya üst sınırın üzerindeki kaynaklar indirilmeyecektir. Birim: KB, sınırlama yapmak istemiyorsanız 0 olarak ayarlayın."
+   },
+   "popup_option_tip": {
+      "message": "İpucu Ayarları"
+   },
+   "popup_option_tip_block": {
+      "message": "Etki alanı engellendiğinde ipucu göster"
+   },
+   "popup_option_tooltip": {
+      "message": "Aşağıdaki alanlardan gelen kaynaklar indirilmeyecektir."
+   },
+   "popup_play_tip": {
+      "message": "Bazı videoları oynattıktan sonra indirebilirsiniz."
+   },
+   "popup_record": {
+      "message": "Kaydet"
+   },
+   "popup_record_mode": {
+      "message": "Kayıt Modu"
+   },
+   "popup_record_mode_default": {
+      "message": "Varsayılan Mod Olarak Ayarla"
+   },
+   "popup_record_mode_default_tooltip": {
+      "message": "Bir dahaki sefere bu web sitesindeki videoları kaydettiğinizde, yukarıda seçilen mod varsayılan olarak kullanılacaktır."
+   },
+   "popup_record_mode_error_tips": {
+      "message": "Lütfen bir kayıt modu seçin"
+   },
+   "popup_record_mode_mse": {
+      "message": "MSE (Arabellek Modu)"
+   },
+   "popup_record_mode_mse_tooltip": {
+      "message": "Oynatıcının arabelleğini kaydeder. Avantajı, oynatmayı hızlandırarak ve arabellek bölümlerini atlayarak kayıt sürecini hızlandırabilmenizdir. Dezavantajı ise daha düşük uyumluluktur ve özel yapılı medya akışlarını doğru şekilde işleyemeyebilir."
+   },
+   "popup_record_mode_msr": {
+      "message": "MSR (Ekran Kayıt Modu)"
+   },
+   "popup_record_mode_msr_tooltip": {
+      "message": "Oynatıcının ekranını ve sesini kaydeder. MSE'den daha iyi uyumluluğa sahiptir, ancak dezavantajı oynatmayı hızlandırarak veya arabellek bölümlerini atlayarak kayıt sürecini hızlandıramamanızdır. Canlı yayınlar ve MSE ile kaydedilemeyen videolar için önerilir."
+   },
+   "popup_record_mode_switch_tooltip": {
+      "message": "Modu Değiştir"
+   },
+   "popup_record_no_media_tips": {
+      "message": "Kaydedilebilir video algılanmadı. Video mevcut ve oynatılabilirse, lütfen videonun sesinin kapalı olup olmadığını kontrol edin ve sesini açın!"
+   },
+   "popup_record_start": {
+      "message": "Kayda Başla"
+   }
+}

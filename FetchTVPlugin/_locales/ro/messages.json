@@ -1,0 +1,155 @@
+{
+   "manifest_browser_action": {
+      "message": "FetchV"
+   },
+   "manifest_description": {
+      "message": "Descărcătorul de videoclipuri pentru salvarea videoclipurilor web și a transmisiunilor live."
+   },
+   "manifest_name": {
+      "message": "FetchV - Descărcător de videoclipuri m3u8/hls"
+   },
+   "modal_record": {
+      "message": "Înregistrare"
+   },
+   "modal_record_end": {
+      "message": "Terminare"
+   },
+   "modal_record_start": {
+      "message": "Pornire"
+   },
+   "popup_disable": {
+      "message": "Ne pare rău, nu putem descărca videoclipurile de pe această pagină pentru dvs."
+   },
+   "popup_disable_detail": {
+      "message": "Mai multe detalii"
+   },
+   "popup_home": {
+      "message": "Pagina principală"
+   },
+   "popup_inject_capture_no_video": {
+      "message": "Nu a fost găsit niciun videoclip disponibil!"
+   },
+   "popup_inject_capture_off": {
+      "message": "Capturarea pe bază de conținut este activată pentru acest site"
+   },
+   "popup_inject_capture_on": {
+      "message": "Activează capturarea pe bază de conținut pentru acest site"
+   },
+   "popup_inject_capture_tooltip": {
+      "message": "Anumite tipuri speciale de liste m3u8 ar putea să nu fie detectate automat! Activarea acestei opțiuni permite detectarea lor din conținutul paginii (dacă există). Notă: Nu activați această opțiune în mod normal, deoarece poate consuma mai multe resurse!"
+   },
+   "popup_item_block": {
+      "message": "Blocați toate resursele de pe acest domeniu"
+   },
+   "popup_item_block_error": {
+      "message": "Puteți bloca maxim 30 de domenii!"
+   },
+   "popup_item_block_modal_btn_confirm": {
+      "message": "Confirmare"
+   },
+   "popup_item_block_modal_content": {
+      "message": "Sunteți sigur că doriți să blocați toate resursele de pe acest domeniu? După blocare, puteți gestiona această opțiune în setări."
+   },
+   "popup_item_block_modal_title": {
+      "message": "Blocați domeniul"
+   },
+   "popup_item_block_success": {
+      "message": "Domeniul a fost blocat cu succes!"
+   },
+   "popup_item_copy": {
+      "message": "Copiere link"
+   },
+   "popup_item_copy_error": {
+      "message": "Eroare la copiere!"
+   },
+   "popup_item_copy_success": {
+      "message": "Copiat cu succes!"
+   },
+   "popup_item_download": {
+      "message": "Descărcare"
+   },
+   "popup_item_play": {
+      "message": "Redare previzualizare"
+   },
+   "popup_no_resource": {
+      "message": "Nu sunt disponibile resurse"
+   },
+   "popup_no_resource_bottom": {
+      "message": "Dacă fișierul media dorit nu apare în listă sau dacă descărcarea eșuează, încercați următoarele soluții."
+   },
+   "popup_no_resource_lead": {
+      "message": "Este posibil ca unele videoclipuri să trebuiască să fie redate mai întâi pentru a putea fi detectate. Dacă resursa nu este capturată nici după redare, încercați următoarele metode."
+   },
+   "popup_option": {
+      "message": "Opțiuni"
+   },
+   "popup_option_block": {
+      "message": "Blocați domeniul"
+   },
+   "popup_option_block_empty": {
+      "message": "Niciun domeniu blocat"
+   },
+   "popup_option_setup_success": {
+      "message": "Setările au fost salvate!"
+   },
+   "popup_option_size": {
+      "message": "Filtru de dimensiune"
+   },
+   "popup_option_size_max": {
+      "message": "Limita superioară"
+   },
+   "popup_option_size_min": {
+      "message": "Limita inferioară"
+   },
+   "popup_option_size_tooltip": {
+      "message": "Resursele cu dimensiuni sub limita inferioară sau peste limita superioară nu vor fi descărcate. Unitate: KB, setați la 0 pentru a nu exista restricții."
+   },
+   "popup_option_tip": {
+      "message": "Setări sfaturi"
+   },
+   "popup_option_tip_block": {
+      "message": "Afișați sfaturi în timpul blocării domeniului"
+   },
+   "popup_option_tooltip": {
+      "message": "Resursele din următoarele domenii nu vor fi descărcate."
+   },
+   "popup_play_tip": {
+      "message": "Unele videoclipuri pot fi descărcate doar după redare."
+   },
+   "popup_record": {
+      "message": "Înregistrare"
+   },
+   "popup_record_mode": {
+      "message": "Mod de înregistrare"
+   },
+   "popup_record_mode_default": {
+      "message": "Setează ca mod implicit"
+   },
+   "popup_record_mode_default_tooltip": {
+      "message": "Data viitoare când înregistrați videoclipuri de pe acest site web, modul selectat mai sus va fi folosit implicit."
+   },
+   "popup_record_mode_error_tips": {
+      "message": "Vă rugăm să selectați un mod de înregistrare"
+   },
+   "popup_record_mode_mse": {
+      "message": "MSE (Mod buffer)"
+   },
+   "popup_record_mode_mse_tooltip": {
+      "message": "Înregistrează bufferul playerului. Avantajul său este că puteți accelera procesul de înregistrare accelerând redarea și sărind segmentele de buffer. Dezavantajul său este o compatibilitate mai slabă și s-ar putea să nu gestioneze corect fluxurile media cu structuri speciale."
+   },
+   "popup_record_mode_msr": {
+      "message": "MSR (Mod de înregistrare a ecranului)"
+   },
+   "popup_record_mode_msr_tooltip": {
+      "message": "Înregistrează ecranul și sunetul playerului. Are o compatibilitate mai bună decât MSE, dar dezavantajul său este că nu puteți accelera procesul de înregistrare accelerând redarea sau sărind segmentele de buffer. Este recomandat pentru transmisiuni live și videoclipuri care nu pot fi înregistrate cu MSE."
+   },
+   "popup_record_mode_switch_tooltip": {
+      "message": "Schimbați modul"
+   },
+   "popup_record_no_media_tips": {
+      "message": "Nu a fost detectat niciun videoclip înregistrabil. Dacă videoclipul există și este redabil, vă rugăm să verificați dacă este oprit și să reactivați sunetul!"
+   },
+   "popup_record_start": {
+      "message": "Porniți înregistrarea"
+   }
+}

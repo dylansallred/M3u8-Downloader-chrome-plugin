@@ -1,0 +1,155 @@
+{
+   "manifest_browser_action": {
+      "message": "FetchV"
+   },
+   "manifest_description": {
+      "message": "De video-downloader voor het opslaan van webvideo’s en livestreams."
+   },
+   "manifest_name": {
+      "message": "FetchV - Video-downloader m3u8/hls"
+   },
+   "modal_record": {
+      "message": "Opnemen"
+   },
+   "modal_record_end": {
+      "message": "Einde"
+   },
+   "modal_record_start": {
+      "message": "Start"
+   },
+   "popup_disable": {
+      "message": "Sorry, we kunnen de video's op deze pagina niet voor je downloaden."
+   },
+   "popup_disable_detail": {
+      "message": "Meer details"
+   },
+   "popup_home": {
+      "message": "Startpagina"
+   },
+   "popup_inject_capture_no_video": {
+      "message": "Geen beschikbare video gevonden!"
+   },
+   "popup_inject_capture_off": {
+      "message": "Inhoudsgebaseerde capture is ingeschakeld voor deze site"
+   },
+   "popup_inject_capture_on": {
+      "message": "Inhoudsgebaseerde capture inschakelen voor deze site"
+   },
+   "popup_inject_capture_tooltip": {
+      "message": "Bepaalde speciale m3u8-afspeellijsten worden mogelijk niet automatisch herkend! Door deze optie in te schakelen kunnen ze worden gedetecteerd op basis van de paginainhoud (indien aanwezig). Let op: Schakel deze optie niet in bij normaal gebruik om overmatig gebruik van systeembronnen te voorkomen!"
+   },
+   "popup_item_block": {
+      "message": "Blokkeer alle bronnen van dit domein"
+   },
+   "popup_item_block_error": {
+      "message": "Je kunt maximaal 30 domeinen blokkeren!"
+   },
+   "popup_item_block_modal_btn_confirm": {
+      "message": "Bevestigen"
+   },
+   "popup_item_block_modal_content": {
+      "message": "Weet je zeker dat je alle bronnen van dit domein wilt blokkeren? Na het blokkeren kun je deze optie beheren in de instellingen."
+   },
+   "popup_item_block_modal_title": {
+      "message": "Domein blokkeren"
+   },
+   "popup_item_block_success": {
+      "message": "Domein succesvol geblokkeerd!"
+   },
+   "popup_item_copy": {
+      "message": "Link kopiëren"
+   },
+   "popup_item_copy_error": {
+      "message": "Kopiëren mislukt!"
+   },
+   "popup_item_copy_success": {
+      "message": "Kopiëren gelukt!"
+   },
+   "popup_item_download": {
+      "message": "Downloaden"
+   },
+   "popup_item_play": {
+      "message": "Voorbeeld afspelen"
+   },
+   "popup_no_resource": {
+      "message": "Geen bronnen beschikbaar"
+   },
+   "popup_no_resource_bottom": {
+      "message": "Als het gewenste mediabestand niet in de lijst staat of het downloaden mislukt, probeer dan de volgende oplossingen."
+   },
+   "popup_no_resource_lead": {
+      "message": "Sommige video's moeten mogelijk eerst worden afgespeeld voordat ze gedetecteerd kunnen worden. Als het afspelen geen resultaat oplevert, probeer dan de volgende methoden."
+   },
+   "popup_option": {
+      "message": "Opties"
+   },
+   "popup_option_block": {
+      "message": "Domein blokkeren"
+   },
+   "popup_option_block_empty": {
+      "message": "Geen geblokkeerde domeinen"
+   },
+   "popup_option_setup_success": {
+      "message": "Instellingen succesvol opgeslagen!"
+   },
+   "popup_option_size": {
+      "message": "Groottefilter"
+   },
+   "popup_option_size_max": {
+      "message": "Bovengrens"
+   },
+   "popup_option_size_min": {
+      "message": "Ondergrens"
+   },
+   "popup_option_size_tooltip": {
+      "message": "Bronnen met een grootte onder de ondergrens of boven de bovengrens worden niet gedownload. Eenheid: KB, stel in op 0 voor geen beperking."
+   },
+   "popup_option_tip": {
+      "message": "Tip-instelling"
+   },
+   "popup_option_tip_block": {
+      "message": "Toon tip tijdens het blokkeren van het domein"
+   },
+   "popup_option_tooltip": {
+      "message": "Bronnen van de volgende domeinen worden niet gedownload."
+   },
+   "popup_play_tip": {
+      "message": "Sommige video's kunnen alleen worden gedownload als ze worden afgespeeld."
+   },
+   "popup_record": {
+      "message": "Opnemen"
+   },
+   "popup_record_mode": {
+      "message": "Opnamemodus"
+   },
+   "popup_record_mode_default": {
+      "message": "Instellen als standaardmodus"
+   },
+   "popup_record_mode_default_tooltip": {
+      "message": "De volgende keer dat u video's op deze website opneemt, wordt de hierboven geselecteerde modus standaard gebruikt."
+   },
+   "popup_record_mode_error_tips": {
+      "message": "Selecteer een opnamemodus"
+   },
+   "popup_record_mode_mse": {
+      "message": "MSE (Buffermodus)"
+   },
+   "popup_record_mode_mse_tooltip": {
+      "message": "Neemt de buffer van de speler op. Het voordeel is dat u het opnameproces kunt versnellen door de afspeelsnelheid te verhogen en buffers te overslaan. Het nadeel is een lagere compatibiliteit, en het kan mogelijk mediastreams met speciale structuren niet correct verwerken."
+   },
+   "popup_record_mode_msr": {
+      "message": "MSR (Schermopnamemodus)"
+   },
+   "popup_record_mode_msr_tooltip": {
+      "message": "Neemt het scherm en het geluid van de speler op. Het heeft een betere compatibiliteit dan MSE, maar het nadeel is dat u het opnameproces niet kunt versnellen door de afspeelsnelheid te verhogen of buffers te overslaan. Het wordt aanbevolen voor livestreams en video's die niet met MSE kunnen worden opgenomen."
+   },
+   "popup_record_mode_switch_tooltip": {
+      "message": "Modus wijzigen"
+   },
+   "popup_record_no_media_tips": {
+      "message": "Geen opneembare video gedetecteerd. Als de video bestaat en afspeelbaar is, controleer dan of de video is gedempt en schakel de demping uit!"
+   },
+   "popup_record_start": {
+      "message": "Start opname"
+   }
+}

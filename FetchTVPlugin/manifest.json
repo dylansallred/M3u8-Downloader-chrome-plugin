@@ -1,0 +1,52 @@
+{
+   "action": {
+      "default_icon": {
+         "128": "img/icon-128.png",
+         "16": "img/icon-16.png",
+         "48": "img/icon-48.png"
+      },
+      "default_popup": "popup.html",
+      "default_title": "__MSG_manifest_browser_action__"
+   },
+   "background": {
+      "service_worker": "service-worker.js"
+   },
+   "content_scripts": [ {
+      "all_frames": false,
+      "js": [ "js/router.js" ],
+      "matches": [ "http://localhost:3000/router.html*" ],
+      "run_at": "document_end"
+   }, {
+      "all_frames": false,
+      "js": [ "js/content.js" ],
+      "matches": [ "http://localhost:3000/m3u8downloader*", "http://localhost:3000/*/m3u8downloader*", "http://localhost:3000/videodownloader*", "http://localhost:3000/*/videodownloader*", "http://localhost:3000/bufferrecorder*", "http://localhost:3000/*/bufferrecorder*" ],
+      "run_at": "document_end"
+   }, {
+      "all_frames": true,
+      "exclude_matches": [ "*://fetchv.net/*", "https://*.doubleclick.net/*", "https://www.google.com/recaptcha/*" ],
+      "js": [ "js/injection.js" ],
+      "matches": [ "\u003Call_urls>" ],
+      "run_at": "document_start"
+   } ],
+   "default_locale": "en",
+   "description": "__MSG_manifest_description__",
+   "homepage_url": "https://fetchv.net/",
+   "host_permissions": [ "https://*/*", "http://*/*" ],
+   "icons": {
+      "128": "img/icon-128.png",
+      "16": "img/icon-16.png",
+      "48": "img/icon-48.png"
+   },
+   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA0suANhEanTUcnawHd92hHDRa7VEqeHUj7pTTgFTrcXvrcHt+sDr1Y7xZkevbOVZKvur8czNEv8fnXMhglTZWGbWvqUc+A5P0hPDGT3PkRTYzTUPeT9HMe+dKYYTPDBtOv/Pnbcm2aCjghvRivlMbktw9zAoGbOinsW2KESrBsS1tAwtpHR0vNLEsvX4hILxF5dTuBBkIdC3JVtK5CXaoCZTvXWjGWhkgEA0Ipv8r7KHfkEXWbWQeaa1aRKL/5WF6yrSgEPPaauiYp01dfg5cc68XrdMsXQNTiyJwxvKPUuoxEB2mV9UeEPMordlzUUY2whjS7qChYcWvPO1sAUIp3wIDAQAB",
+   "manifest_version": 3,
+   "minimum_chrome_version": "92",
+   "name": "__MSG_manifest_name__",
+   "permissions": [ "tabs", "webRequest", "storage", "declarativeNetRequest", "offscreen", "scripting" ],
+   "short_name": "FetchV",
+   "update_url": "https://clients2.google.com/service/update2/crx",
+   "version": "3.2",
+   "web_accessible_resources": [ {
+      "matches": [ "\u003Call_urls>" ],
+      "resources": [ "js/hook.js", "js/mediabunny.js", "img/recording.svg" ]
+   } ]
+}

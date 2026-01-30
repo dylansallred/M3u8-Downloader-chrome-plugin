@@ -1,0 +1,155 @@
+{
+   "manifest_browser_action": {
+      "message": "FetchV"
+   },
+   "manifest_description": {
+      "message": "वेब वीडियो और लाइव स्ट्रीम सहेजने के लिए वीडियो डाउनलोडर।"
+   },
+   "manifest_name": {
+      "message": "FetchV - m3u8/hls वीडियो डाउनलोडर"
+   },
+   "modal_record": {
+      "message": "रिकॉर्ड"
+   },
+   "modal_record_end": {
+      "message": "समाप्त करें"
+   },
+   "modal_record_start": {
+      "message": "शुरू करें"
+   },
+   "popup_disable": {
+      "message": "माफ़ कीजिए, हम आपके लिए इस पेज के वीडियो को डाउपर्सनल नहीं कर सकते हैं।"
+   },
+   "popup_disable_detail": {
+      "message": "विवरण जानें"
+   },
+   "popup_home": {
+      "message": "होम"
+   },
+   "popup_inject_capture_no_video": {
+      "message": "कोई उपलब्ध वीडियो नहीं मिला!"
+   },
+   "popup_inject_capture_off": {
+      "message": "इस साइट के लिए कंटेंट-आधारित कैप्चर सक्षम है"
+   },
+   "popup_inject_capture_on": {
+      "message": "इस साइट के लिए कंटेंट-आधारित कैप्चर सक्षम करें"
+   },
+   "popup_inject_capture_tooltip": {
+      "message": "कुछ विशेष प्रकार की m3u8 प्लेलिस्ट स्वचालित रूप से पहचान में नहीं आ सकती हैं! इस विकल्प को सक्षम करने से उन्हें पेज सामग्री से पहचाना जा सकता है (अगर उपलब्ध हों)। ध्यान दें: सामान्य परिस्थितियों में इस विकल्प को सक्रिय न करें, क्योंकि इससे अधिक संसाधनों की खपत हो सकती है।"
+   },
+   "popup_item_block": {
+      "message": "इस डोमेन से आने वाले सभी संसाधनों को ब्लॉक करें"
+   },
+   "popup_item_block_error": {
+      "message": "केवल 30 डोमेन तक ही ब्लॉक किया जा सकता है!"
+   },
+   "popup_item_block_modal_btn_confirm": {
+      "message": "पुष्टि करें"
+   },
+   "popup_item_block_modal_content": {
+      "message": "क्या आप इस डोमेन से आने वाले सभी संसाधनों को ब्लॉक करना चाहते हैं? ब्लॉक करने के बाद, आप इस विकल्प को सेटिंग में प्रबंधित कर सकते हैं।"
+   },
+   "popup_item_block_modal_title": {
+      "message": "इस डोमेन को ब्लॉक करें"
+   },
+   "popup_item_block_success": {
+      "message": "इस डोमेन को सफलतापूर्वक ब्लॉक किया गया है!"
+   },
+   "popup_item_copy": {
+      "message": "लिंक कॉपी करें"
+   },
+   "popup_item_copy_error": {
+      "message": "कॉपी विफल!"
+   },
+   "popup_item_copy_success": {
+      "message": "कॉपी सफलतापूर्वक!"
+   },
+   "popup_item_download": {
+      "message": "डाउनलोड करें"
+   },
+   "popup_item_play": {
+      "message": "पूर्वावलोकन चलाएं"
+   },
+   "popup_no_resource": {
+      "message": "कोई संसाधन नहीं है"
+   },
+   "popup_no_resource_bottom": {
+      "message": "अगर आपकी वांछित मीडिया सूची में नहीं है या डाउनलोड विफल हो रहा है, तो इन समाधानों को आज़माएँ।"
+   },
+   "popup_no_resource_lead": {
+      "message": "कुछ वीडियो को पकड़ने से पहले उन्हें चलाना पड़ सकता है। अगर चलाने के बाद भी संसाधन नहीं मिल रहा है, तो नीचे दिए गए तरीकों को आज़माएँ।"
+   },
+   "popup_option": {
+      "message": "सेटिंग्स"
+   },
+   "popup_option_block": {
+      "message": "डोमेन ब्लॉक करें"
+   },
+   "popup_option_block_empty": {
+      "message": "कोई डोमेन ब्लॉक नहीं है"
+   },
+   "popup_option_setup_success": {
+      "message": "सेटिंग्स सफलतापूर्वक सेट की गईं!"
+   },
+   "popup_option_size": {
+      "message": "साइज़ फ़िल्टर"
+   },
+   "popup_option_size_max": {
+      "message": "उच्च सीमा"
+   },
+   "popup_option_size_min": {
+      "message": "निम्न सीमा"
+   },
+   "popup_option_size_tooltip": {
+      "message": "निम्न सीमा से कम या उच्च सीमा से अधिक साइज़ वाले संसाधन को नहीं पकड़ा जाएगा, यूनिट KB में है, 0 सेट करें ताकि कोई सीमा न हो।"
+   },
+   "popup_option_tip": {
+      "message": "टिप्पणी सेटिंग्स"
+   },
+   "popup_option_tip_block": {
+      "message": "डोमेन ब्लॉक करने पर टिप्पणी दिखाएँ"
+   },
+   "popup_option_tooltip": {
+      "message": "निम्नलिखित डोमेन से आने वाले संसाधन को पकड़ा नहीं जाएगा"
+   },
+   "popup_play_tip": {
+      "message": "कुछ वीडियो अगर प्ले नहीं होते हैं तो उन्हें पकड़ा नहीं जा सकता है।"
+   },
+   "popup_record": {
+      "message": "रिकॉर्ड करें"
+   },
+   "popup_record_mode": {
+      "message": "रिकॉर्डिंग मोड"
+   },
+   "popup_record_mode_default": {
+      "message": "डिफ़ॉल्ट मोड के रूप में सेट करें"
+   },
+   "popup_record_mode_default_tooltip": {
+      "message": "अगली बार जब आप इस वेबसाइट पर वीडियो रिकॉर्ड करेंगे, तो ऊपर चुना गया मोड डिफ़ॉल्ट रूप से उपयोग किया जाएगा।"
+   },
+   "popup_record_mode_error_tips": {
+      "message": "कृपया एक रिकॉर्डिंग मोड चुनें"
+   },
+   "popup_record_mode_mse": {
+      "message": "MSE (बफर मोड)"
+   },
+   "popup_record_mode_mse_tooltip": {
+      "message": "यह प्लेयर के बफर को रिकॉर्ड करता है। इसका फायदा यह है कि आप प्लेबैक को तेज करके और बफर सेगमेंट को छोड़कर रिकॉर्डिंग प्रक्रिया को तेज कर सकते हैं। इसका नुकसान कम अनुकूलता है, और यह विशेष संरचनाओं के साथ मीडिया स्ट्रीम को ठीक से हैंडल नहीं कर सकता है।"
+   },
+   "popup_record_mode_msr": {
+      "message": "MSR (स्क्रीन रिकॉर्डिंग मोड)"
+   },
+   "popup_record_mode_msr_tooltip": {
+      "message": "यह प्लेयर की स्क्रीन और ध्वनि को रिकॉर्ड करता है। इसमें MSE की तुलना में बेहतर अनुकूलता है, लेकिन इसका नुकसान यह है कि आप प्लेबैक को तेज करके या बफर सेगमेंट को छोड़कर रिकॉर्डिंग प्रक्रिया को तेज नहीं कर सकते हैं। इसे लाइव स्ट्रीम और उन वीडियो के लिए अनुशंसित किया जाता है जिन्हें MSE का उपयोग करके रिकॉर्ड नहीं किया जा सकता है।"
+   },
+   "popup_record_mode_switch_tooltip": {
+      "message": "मोड बदलें"
+   },
+   "popup_record_no_media_tips": {
+      "message": "कोई रिकॉर्ड करने योग्य वीडियो नहीं मिला। यदि वीडियो मौजूद है और चलाया जा सकता है, तो कृपया जांचें कि क्या वीडियो म्यूट है और इसे अनम्यूट करें!"
+   },
+   "popup_record_start": {
+      "message": "रिकॉर्डिंग शुरू करें"
+   }
+}

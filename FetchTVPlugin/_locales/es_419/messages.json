@@ -1,0 +1,155 @@
+{
+   "manifest_browser_action": {
+      "message": "FetchV"
+   },
+   "manifest_description": {
+      "message": "El descargador de videos para guardar videos en línea y transmisiones en vivo."
+   },
+   "manifest_name": {
+      "message": "FetchV - Video descargar(mp4/m3u8/hls)"
+   },
+   "modal_record": {
+      "message": "Grabar"
+   },
+   "modal_record_end": {
+      "message": "Finalizar"
+   },
+   "modal_record_start": {
+      "message": "Iniciar"
+   },
+   "popup_disable": {
+      "message": "Lo sentimos, no podemos descargar el video de esta página."
+   },
+   "popup_disable_detail": {
+      "message": "Obtener más información"
+   },
+   "popup_home": {
+      "message": "Inicio"
+   },
+   "popup_inject_capture_no_video": {
+      "message": "¡No se encontró ningún video disponible!"
+   },
+   "popup_inject_capture_off": {
+      "message": "La captura basada en contenido está habilitada para este sitio web"
+   },
+   "popup_inject_capture_on": {
+      "message": "Habilitar captura basada en contenido para este sitio web"
+   },
+   "popup_inject_capture_tooltip": {
+      "message": "¡Algunos tipos especiales de listas m3u8 pueden no ser detectadas automáticamente! Activar esta opción permite detectarlas desde el contenido de la página (si existen). Nota: ¡Si esta opción no funciona, desactívela para evitar consumir más recursos del sistema!"
+   },
+   "popup_item_block": {
+      "message": "Bloquear todas las fuentes de este dominio"
+   },
+   "popup_item_block_error": {
+      "message": "¡Solo puedes bloquear hasta 30 dominios!"
+   },
+   "popup_item_block_modal_btn_confirm": {
+      "message": "Confirmar"
+   },
+   "popup_item_block_modal_content": {
+      "message": "¿Estás seguro de bloquear todas las fuentes de este dominio? Después de bloquearlo, puedes administrar esta opción en la configuración."
+   },
+   "popup_item_block_modal_title": {
+      "message": "Bloquear dominio"
+   },
+   "popup_item_block_success": {
+      "message": "¡Dominio bloqueado exitosamente!"
+   },
+   "popup_item_copy": {
+      "message": "Copiar enlace"
+   },
+   "popup_item_copy_error": {
+      "message": "Error al copiar!"
+   },
+   "popup_item_copy_success": {
+      "message": "¡Copia exitosa!"
+   },
+   "popup_item_download": {
+      "message": "Descargar"
+   },
+   "popup_item_play": {
+      "message": "Reproducir vista previa"
+   },
+   "popup_no_resource": {
+      "message": "No hay recursos disponibles"
+   },
+   "popup_no_resource_bottom": {
+      "message": "Si el medio que buscas no aparece en la lista o la descarga falla, puedes intentar las siguientes soluciones."
+   },
+   "popup_no_resource_lead": {
+      "message": "Es posible que algunos videos necesiten reproducirse primero para ser detectados. Si después de reproducir el video aún no se captura el recurso, prueba las siguientes opciones."
+   },
+   "popup_option": {
+      "message": "Configuración"
+   },
+   "popup_option_block": {
+      "message": "Bloquear dominio"
+   },
+   "popup_option_block_empty": {
+      "message": "Sin dominios bloqueados"
+   },
+   "popup_option_setup_success": {
+      "message": "¡La configuración se guardó correctamente!"
+   },
+   "popup_option_size": {
+      "message": "Filtro de tamaño"
+   },
+   "popup_option_size_max": {
+      "message": "Máximo"
+   },
+   "popup_option_size_min": {
+      "message": "Mínimo"
+   },
+   "popup_option_size_tooltip": {
+      "message": "Las fuentes con un tamaño menor al mínimo o mayor al máximo no se descargarán. El tamaño se especifica en KB, la configuración 0 significa sin restricciones."
+   },
+   "popup_option_tip": {
+      "message": "Configuración de consejos"
+   },
+   "popup_option_tip_block": {
+      "message": "Mostrar consejos al bloquear dominios"
+   },
+   "popup_option_tooltip": {
+      "message": "Las fuentes de los siguientes dominios no se descargarán."
+   },
+   "popup_play_tip": {
+      "message": "Algunos videos solo se pueden descargar después de reproducirlos."
+   },
+   "popup_record": {
+      "message": "Grabar"
+   },
+   "popup_record_mode": {
+      "message": "Modo de grabación"
+   },
+   "popup_record_mode_default": {
+      "message": "Establecer como modo predeterminado"
+   },
+   "popup_record_mode_default_tooltip": {
+      "message": "La próxima vez que grabe vídeos en este sitio web, se usará el modo seleccionado arriba de forma predeterminada."
+   },
+   "popup_record_mode_error_tips": {
+      "message": "Seleccione un modo de grabación"
+   },
+   "popup_record_mode_mse": {
+      "message": "MSE (Modo de búfer)"
+   },
+   "popup_record_mode_mse_tooltip": {
+      "message": "Graba el búfer del reproductor. Su ventaja es que se puede acelerar el proceso de grabación acelerando la reproducción y saltando segmentos del búfer. Su desventaja es una menor compatibilidad, y es posible que no procese correctamente los flujos de medios con estructuras especiales."
+   },
+   "popup_record_mode_msr": {
+      "message": "MSR (Modo de grabación de pantalla)"
+   },
+   "popup_record_mode_msr_tooltip": {
+      "message": "Graba la pantalla y el sonido del reproductor. Tiene mejor compatibilidad que MSE, pero su desventaja es que no se puede acelerar el proceso de grabación acelerando la reproducción o saltando segmentos del búfer. Se recomienda para transmisiones en vivo y vídeos que no se pueden grabar con MSE."
+   },
+   "popup_record_mode_switch_tooltip": {
+      "message": "Cambiar modo"
+   },
+   "popup_record_no_media_tips": {
+      "message": "No se detectó ningún vídeo grabable. Si el vídeo existe y se puede reproducir, compruebe si el vídeo está silenciado y quite el silencio."
+   },
+   "popup_record_start": {
+      "message": "Empezar a grabar"
+   }
+}

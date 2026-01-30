@@ -1,0 +1,155 @@
+{
+   "manifest_browser_action": {
+      "message": "FetchV"
+   },
+   "manifest_description": {
+      "message": "Le téléchargeur de vidéos pour enregistrer des vidéos en ligne et des diffusions en direct."
+   },
+   "manifest_name": {
+      "message": "FetchV - Télécharger vidéo en ligne"
+   },
+   "modal_record": {
+      "message": "Enregistrer"
+   },
+   "modal_record_end": {
+      "message": "Terminer"
+   },
+   "modal_record_start": {
+      "message": "Démarrer"
+   },
+   "popup_disable": {
+      "message": "Malheureusement, nous ne pouvons pas télécharger de vidéo à partir de cette page."
+   },
+   "popup_disable_detail": {
+      "message": "Plus d'informations"
+   },
+   "popup_home": {
+      "message": "Accueil"
+   },
+   "popup_inject_capture_no_video": {
+      "message": "Aucune vidéo disponible trouvée !"
+   },
+   "popup_inject_capture_off": {
+      "message": "La capture basée sur le contenu est activée pour ce site"
+   },
+   "popup_inject_capture_on": {
+      "message": "Activer la capture basée sur le contenu pour ce site"
+   },
+   "popup_inject_capture_tooltip": {
+      "message": "Certains types spéciaux de playlists m3u8 peuvent ne pas être détectés automatiquement ! En activant cette option, ils peuvent être identifiés à partir du contenu de la page (si disponible). Remarque : N’activez pas cette option en temps normal, cela pourrait augmenter l’utilisation des ressources système."
+   },
+   "popup_item_block": {
+      "message": "Bloquer toutes les ressources de ce domaine"
+   },
+   "popup_item_block_error": {
+      "message": "Vous pouvez bloquer jusqu'à 30 domaines !"
+   },
+   "popup_item_block_modal_btn_confirm": {
+      "message": "Confirmer"
+   },
+   "popup_item_block_modal_content": {
+      "message": "Êtes-vous sûr de vouloir bloquer toutes les ressources de ce domaine ? Après le blocage, vous pourrez gérer ce paramètre dans les paramètres."
+   },
+   "popup_item_block_modal_title": {
+      "message": "Bloquer ce domaine"
+   },
+   "popup_item_block_success": {
+      "message": "Le domaine a été bloqué avec succès !"
+   },
+   "popup_item_copy": {
+      "message": "Copier le lien"
+   },
+   "popup_item_copy_error": {
+      "message": "Erreur de copie !"
+   },
+   "popup_item_copy_success": {
+      "message": "Copie réussie !"
+   },
+   "popup_item_download": {
+      "message": "Télécharger"
+   },
+   "popup_item_play": {
+      "message": "Lire l'aperçu"
+   },
+   "popup_no_resource": {
+      "message": "Aucune ressource disponible"
+   },
+   "popup_no_resource_bottom": {
+      "message": "Si le média souhaité n'apparaît pas dans la liste ou si le téléchargement échoue, essayez les solutions suivantes."
+   },
+   "popup_no_resource_lead": {
+      "message": "Certains vidéos doivent peut-être être lancées avant de pouvoir être détectées. Si le contenu ne s'affiche pas après lecture, essayez les solutions suivantes."
+   },
+   "popup_option": {
+      "message": "Paramètres"
+   },
+   "popup_option_block": {
+      "message": "Bloquer le domaine"
+   },
+   "popup_option_block_empty": {
+      "message": "Aucun domaine bloqué"
+   },
+   "popup_option_setup_success": {
+      "message": "Les paramètres ont été enregistrés avec succès !"
+   },
+   "popup_option_size": {
+      "message": "Filtre de taille"
+   },
+   "popup_option_size_max": {
+      "message": "Maximale"
+   },
+   "popup_option_size_min": {
+      "message": "Minimale"
+   },
+   "popup_option_size_tooltip": {
+      "message": "Les ressources de taille inférieure à la taille minimale ou supérieure à la taille maximale ne seront pas téléchargées. La taille est indiquée en kilooctets (Ko), la valeur 0 signifie aucune limitation."
+   },
+   "popup_option_tip": {
+      "message": "Paramètres des conseils"
+   },
+   "popup_option_tip_block": {
+      "message": "Afficher des conseils lors du blocage de domaines"
+   },
+   "popup_option_tooltip": {
+      "message": "Les ressources des domaines suivants ne seront pas téléchargées."
+   },
+   "popup_play_tip": {
+      "message": "Certaines vidéos doivent être lues avant de pouvoir les télécharger."
+   },
+   "popup_record": {
+      "message": "Enregistrer"
+   },
+   "popup_record_mode": {
+      "message": "Mode d'enregistrement"
+   },
+   "popup_record_mode_default": {
+      "message": "Définir comme mode par défaut"
+   },
+   "popup_record_mode_default_tooltip": {
+      "message": "La prochaine fois que vous enregistrerez des vidéos sur ce site web, le mode sélectionné ci-dessus sera utilisé par défaut."
+   },
+   "popup_record_mode_error_tips": {
+      "message": "Veuillez sélectionner un mode d'enregistrement"
+   },
+   "popup_record_mode_mse": {
+      "message": "MSE (Mode de mise en mémoire tampon)"
+   },
+   "popup_record_mode_mse_tooltip": {
+      "message": "Enregistre la mémoire tampon du lecteur. Son avantage est que vous pouvez accélérer le processus d'enregistrement en accélérant la lecture et en sautant des segments de mémoire tampon. Son inconvénient est une compatibilité plus faible, et il peut ne pas gérer correctement les flux multimédias avec des structures spéciales."
+   },
+   "popup_record_mode_msr": {
+      "message": "MSR (Mode d'enregistrement d'écran)"
+   },
+   "popup_record_mode_msr_tooltip": {
+      "message": "Enregistre l'écran et le son du lecteur. Il a une meilleure compatibilité que MSE, mais son inconvénient est que vous ne pouvez pas accélérer le processus d'enregistrement en accélérant la lecture ou en sautant des segments de mémoire tampon. Il est recommandé pour les flux en direct et les vidéos qui ne peuvent pas être enregistrées avec MSE."
+   },
+   "popup_record_mode_switch_tooltip": {
+      "message": "Changer de mode"
+   },
+   "popup_record_no_media_tips": {
+      "message": "Aucune vidéo enregistrable détectée. Si la vidéo existe et est lisible, veuillez vérifier si elle est en mode silencieux et réactiver le son!"
+   },
+   "popup_record_start": {
+      "message": "Démarrer l'enregistrement"
+   }
+}

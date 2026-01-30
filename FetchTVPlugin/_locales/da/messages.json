@@ -1,0 +1,155 @@
+{
+   "manifest_browser_action": {
+      "message": "FetchV"
+   },
+   "manifest_description": {
+      "message": "Video-downloader til at gemme webvideoer og livestreams."
+   },
+   "manifest_name": {
+      "message": "FetchV - m3u8/hls video downloader"
+   },
+   "modal_record": {
+      "message": "Optag"
+   },
+   "modal_record_end": {
+      "message": "Slut"
+   },
+   "modal_record_start": {
+      "message": "Start"
+   },
+   "popup_disable": {
+      "message": "Beklager, vi kan ikke downloade videoen fra denne side."
+   },
+   "popup_disable_detail": {
+      "message": "Få flere oplysninger"
+   },
+   "popup_home": {
+      "message": "Hjem"
+   },
+   "popup_inject_capture_no_video": {
+      "message": "Ingen tilgængelig video fundet!"
+   },
+   "popup_inject_capture_off": {
+      "message": "Indholdsbaseret optagelse er aktiveret for dette websted"
+   },
+   "popup_inject_capture_on": {
+      "message": "Aktivér indholdsbaseret optagelse for dette websted"
+   },
+   "popup_inject_capture_tooltip": {
+      "message": "Visse specielle typer m3u8-playlister kan muligvis ikke genkendes automatisk! Hvis du aktiverer denne funktion, kan de blive opdaget ud fra sidens indhold (hvis tilgængeligt). Bemærk: Undgå at aktivere dette under normale forhold, da det kan forbruge flere ressourcer!"
+   },
+   "popup_item_block": {
+      "message": "Bloker alle ressourcer fra dette domæne"
+   },
+   "popup_item_block_error": {
+      "message": "Du kan kun blokere op til 30 domæner!"
+   },
+   "popup_item_block_modal_btn_confirm": {
+      "message": "Bekræft"
+   },
+   "popup_item_block_modal_content": {
+      "message": "Er du sikker på, at du vil blokere alle ressourcer fra dette domæne? Efter blokeringen kan du administrere denne indstilling i indstillingerne."
+   },
+   "popup_item_block_modal_title": {
+      "message": "Bloker dette domæne"
+   },
+   "popup_item_block_success": {
+      "message": "Domænet blev blokeret med succes!"
+   },
+   "popup_item_copy": {
+      "message": "Kopier link"
+   },
+   "popup_item_copy_error": {
+      "message": "Kopiering mislykkedes!"
+   },
+   "popup_item_copy_success": {
+      "message": "Kopiering lykkedes!"
+   },
+   "popup_item_download": {
+      "message": "Download"
+   },
+   "popup_item_play": {
+      "message": "Afspil forhåndsvisning"
+   },
+   "popup_no_resource": {
+      "message": "Ingen ressourcer"
+   },
+   "popup_no_resource_bottom": {
+      "message": "Hvis din ønskede mediefil ikke vises i listen, eller download mislykkes, kan du prøve følgende løsninger."
+   },
+   "popup_no_resource_lead": {
+      "message": "Nogle videoer skal muligvis afspilles først, før de kan opdages. Hvis ressourcen stadig ikke fanges efter afspilning, så prøv følgende metoder."
+   },
+   "popup_option": {
+      "message": "Indstillinger"
+   },
+   "popup_option_block": {
+      "message": "Bloker domæne"
+   },
+   "popup_option_block_empty": {
+      "message": "Ingen blokerede domæner"
+   },
+   "popup_option_setup_success": {
+      "message": "Indstillingerne blev gemt!"
+   },
+   "popup_option_size": {
+      "message": "Størrelsesfiltrering"
+   },
+   "popup_option_size_max": {
+      "message": "Maksimum"
+   },
+   "popup_option_size_min": {
+      "message": "Minimum"
+   },
+   "popup_option_size_tooltip": {
+      "message": "Ressourcer med en størrelse under minimum eller over maksimum vil ikke blive fanget. Størrelsen er i KB, indstillingen 0 betyder ingen begrænsning."
+   },
+   "popup_option_tip": {
+      "message": "Tipindstillinger"
+   },
+   "popup_option_tip_block": {
+      "message": "Vis tip ved blokering af domæner"
+   },
+   "popup_option_tooltip": {
+      "message": "Ressourcer fra følgende domæner vil ikke blive fanget"
+   },
+   "popup_play_tip": {
+      "message": "Nogle videoer skal afspilles for at blive fanget."
+   },
+   "popup_record": {
+      "message": "Optag"
+   },
+   "popup_record_mode": {
+      "message": "Optagetilstand"
+   },
+   "popup_record_mode_default": {
+      "message": "Indstil som standardtilstand"
+   },
+   "popup_record_mode_default_tooltip": {
+      "message": "Næste gang du optager videoer på denne hjemmeside, vil den valgte tilstand ovenfor blive brugt som standard."
+   },
+   "popup_record_mode_error_tips": {
+      "message": "Vælg venligst en optagetilstand"
+   },
+   "popup_record_mode_mse": {
+      "message": "MSE (Buffertilstand)"
+   },
+   "popup_record_mode_mse_tooltip": {
+      "message": "Optager afspillerens buffer. Dens fordel er, at du kan fremskynde optagelsesprocessen ved at fremskynde afspilningen og springe buffers-segmenter over. Dens ulempe er ringere kompatibilitet, og den kan muligvis ikke behandle mediestrømme med specielle strukturer korrekt."
+   },
+   "popup_record_mode_msr": {
+      "message": "MSR (Skærmoptagelsestilstand)"
+   },
+   "popup_record_mode_msr_tooltip": {
+      "message": "Optager skærmen og lyden fra afspilleren. Den har bedre kompatibilitet end MSE, men dens ulempe er, at du ikke kan fremskynde optagelsesprocessen ved at fremskynde afspilningen eller springe buffers-segmenter over. Det anbefales til live-streams og videoer, der ikke kan optages med MSE."
+   },
+   "popup_record_mode_switch_tooltip": {
+      "message": "Skift tilstand"
+   },
+   "popup_record_no_media_tips": {
+      "message": "Ingen video kan optages. Hvis videoen findes og kan afspilles, skal du tjekke, om videoen er slået fra, og slå lyden til!"
+   },
+   "popup_record_start": {
+      "message": "Start optagelse"
+   }
+}

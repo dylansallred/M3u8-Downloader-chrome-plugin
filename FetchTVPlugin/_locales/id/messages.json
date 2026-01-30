@@ -1,0 +1,155 @@
+{
+   "manifest_browser_action": {
+      "message": "FetchV"
+   },
+   "manifest_description": {
+      "message": "Pengunduh video untuk menyimpan video web dan siaran langsung."
+   },
+   "manifest_name": {
+      "message": "FetchV - Pengunduh video M3U8/HLS"
+   },
+   "modal_record": {
+      "message": "Rekam"
+   },
+   "modal_record_end": {
+      "message": "Selesai"
+   },
+   "modal_record_start": {
+      "message": "Mulai"
+   },
+   "popup_disable": {
+      "message": "Maaf, kami tidak dapat mengunduh video di halaman ini untuk Anda."
+   },
+   "popup_disable_detail": {
+      "message": "Ketahui lebih lanjut"
+   },
+   "popup_home": {
+      "message": "Beranda"
+   },
+   "popup_inject_capture_no_video": {
+      "message": "Tidak ada video yang tersedia!"
+   },
+   "popup_inject_capture_off": {
+      "message": "Penangkapan berbasis konten telah diaktifkan untuk situs ini"
+   },
+   "popup_inject_capture_on": {
+      "message": "Aktifkan penangkapan berbasis konten untuk situs ini"
+   },
+   "popup_inject_capture_tooltip": {
+      "message": "Beberapa jenis playlist m3u8 khusus mungkin tidak terdeteksi secara otomatis! Mengaktifkan opsi ini memungkinkan deteksi dari konten halaman (jika tersedia). Catatan: Jangan aktifkan opsi ini dalam kondisi normal karena dapat menggunakan lebih banyak sumber daya!"
+   },
+   "popup_item_block": {
+      "message": "Filter semua sumber daya dari domain ini"
+   },
+   "popup_item_block_error": {
+      "message": "Hanya dapat memblokir maksimal 30 domain!"
+   },
+   "popup_item_block_modal_btn_confirm": {
+      "message": "Konfirmasi"
+   },
+   "popup_item_block_modal_content": {
+      "message": "Anda yakin ingin memblokir semua sumber daya yang berasal dari domain ini? Setelah diblokir, Anda dapat mengelola opsi ini di pengaturan."
+   },
+   "popup_item_block_modal_title": {
+      "message": "Blokir Domain Ini"
+   },
+   "popup_item_block_success": {
+      "message": "Berhasil memblokir domain ini!"
+   },
+   "popup_item_copy": {
+      "message": "Salin Tautan"
+   },
+   "popup_item_copy_error": {
+      "message": "Gagal disalin!"
+   },
+   "popup_item_copy_success": {
+      "message": "Berhasil disalin!"
+   },
+   "popup_item_download": {
+      "message": "Unduh"
+   },
+   "popup_item_play": {
+      "message": "Pratinjau Putar"
+   },
+   "popup_no_resource": {
+      "message": "Tidak ada sumber daya"
+   },
+   "popup_no_resource_bottom": {
+      "message": "Jika media yang Anda cari tidak muncul di daftar atau gagal diunduh, coba solusi berikut."
+   },
+   "popup_no_resource_lead": {
+      "message": "Beberapa video mungkin perlu diputar terlebih dahulu sebelum dapat terdeteksi. Jika sumber masih tidak terdeteksi setelah diputar, cobalah metode berikut."
+   },
+   "popup_option": {
+      "message": "Pengaturan"
+   },
+   "popup_option_block": {
+      "message": "Blokir Nama Domain"
+   },
+   "popup_option_block_empty": {
+      "message": "Tidak ada domain yang diblokir"
+   },
+   "popup_option_setup_success": {
+      "message": "Pengaturan berhasil!"
+   },
+   "popup_option_size": {
+      "message": "Filter Ukuran"
+   },
+   "popup_option_size_max": {
+      "message": "Batas atas"
+   },
+   "popup_option_size_min": {
+      "message": "Batas bawah"
+   },
+   "popup_option_size_tooltip": {
+      "message": "Sumber daya dengan ukuran di bawah batas bawah atau di atas batas atas tidak akan ditangkap. Unit: KB, atur 0 untuk tidak ada batasan."
+   },
+   "popup_option_tip": {
+      "message": "Pengaturan Petunjuk"
+   },
+   "popup_option_tip_block": {
+      "message": "Tampilkan petunjuk saat memblokir domain"
+   },
+   "popup_option_tooltip": {
+      "message": "Sumber daya dari domain berikut tidak akan ditangkap."
+   },
+   "popup_play_tip": {
+      "message": "Beberapa video mungkin tidak dapat ditangkap jika tidak diputar."
+   },
+   "popup_record": {
+      "message": "Rekam"
+   },
+   "popup_record_mode": {
+      "message": "Mode Perekaman"
+   },
+   "popup_record_mode_default": {
+      "message": "Atur sebagai Mode Default"
+   },
+   "popup_record_mode_default_tooltip": {
+      "message": "Saat merekam video di situs web ini berikutnya, mode yang dipilih di atas akan digunakan secara default."
+   },
+   "popup_record_mode_error_tips": {
+      "message": "Pilih mode perekaman"
+   },
+   "popup_record_mode_mse": {
+      "message": "MSE (Mode Buffer)"
+   },
+   "popup_record_mode_mse_tooltip": {
+      "message": "Merekam buffer pemutar. Keuntungannya adalah Anda dapat mempercepat proses perekaman dengan mempercepat pemutaran dan melewati segmen buffer. Kerugiannya adalah kompatibilitas yang lebih buruk, dan mungkin tidak dapat menangani aliran media dengan struktur khusus dengan benar."
+   },
+   "popup_record_mode_msr": {
+      "message": "MSR (Mode Perekaman Layar)"
+   },
+   "popup_record_mode_msr_tooltip": {
+      "message": "Merekam layar dan suara pemutar. Ini memiliki kompatibilitas yang lebih baik daripada MSE, tetapi kerugiannya adalah Anda tidak dapat mempercepat proses perekaman dengan mempercepat pemutaran atau melewati segmen buffer. Ini direkomendasikan untuk live stream dan video yang tidak dapat direkam menggunakan MSE."
+   },
+   "popup_record_mode_switch_tooltip": {
+      "message": "Ganti Mode"
+   },
+   "popup_record_no_media_tips": {
+      "message": "Tidak ada video yang dapat direkam terdeteksi. Jika video ada dan dapat diputar, periksa apakah video dalam mode bisu dan matikan mode bisu!"
+   },
+   "popup_record_start": {
+      "message": "Mulai Merekam"
+   }
+}

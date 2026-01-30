@@ -1,0 +1,155 @@
+{
+   "manifest_browser_action": {
+      "message": "FetchV"
+   },
+   "manifest_description": {
+      "message": "The video downloader for saving web videos and live streams."
+   },
+   "manifest_name": {
+      "message": "FetchV - Video Downloader for m3u8 & hls"
+   },
+   "modal_record": {
+      "message": "Record"
+   },
+   "modal_record_end": {
+      "message": "End"
+   },
+   "modal_record_start": {
+      "message": "Start"
+   },
+   "popup_disable": {
+      "message": "Sorry, we are unable to download videos from this page."
+   },
+   "popup_disable_detail": {
+      "message": "Learn More"
+   },
+   "popup_home": {
+      "message": "Home"
+   },
+   "popup_inject_capture_no_video": {
+      "message": "No available video found!"
+   },
+   "popup_inject_capture_off": {
+      "message": "Content-based capture is enabled for this site"
+   },
+   "popup_inject_capture_on": {
+      "message": "Enable content-based capture for this site"
+   },
+   "popup_inject_capture_tooltip": {
+      "message": "Certain special types of m3u8 playlists may not be detected automatically! Enabling this option allows detection from the page content (if available). Note: If this option doesn't work, turn it off to avoid consuming more system resources!"
+   },
+   "popup_item_block": {
+      "message": "Filter all resources from this domain"
+   },
+   "popup_item_block_error": {
+      "message": "You can only block up to 30 domains!"
+   },
+   "popup_item_block_modal_btn_confirm": {
+      "message": "Confirm"
+   },
+   "popup_item_block_modal_content": {
+      "message": "Are you sure you want to block all resources from this domain? After blocking, you can manage this option in the settings."
+   },
+   "popup_item_block_modal_title": {
+      "message": "Block Domain"
+   },
+   "popup_item_block_success": {
+      "message": "Domain blocked successfully!"
+   },
+   "popup_item_copy": {
+      "message": "Copy Link"
+   },
+   "popup_item_copy_error": {
+      "message": "Copy failed!"
+   },
+   "popup_item_copy_success": {
+      "message": "Copied successfully!"
+   },
+   "popup_item_download": {
+      "message": "Download"
+   },
+   "popup_item_play": {
+      "message": "Play Preview"
+   },
+   "popup_no_resource": {
+      "message": "No resources"
+   },
+   "popup_no_resource_bottom": {
+      "message": "If your target media is not listed or fails to download, you can try the following solutions."
+   },
+   "popup_no_resource_lead": {
+      "message": "Some videos may need to start playing before they can be detected. If the video still isn't captured after playback begins, try the following methods."
+   },
+   "popup_option": {
+      "message": "Settings"
+   },
+   "popup_option_block": {
+      "message": "Block Domain"
+   },
+   "popup_option_block_empty": {
+      "message": "No blocked domains"
+   },
+   "popup_option_setup_success": {
+      "message": "Settings saved successfully!"
+   },
+   "popup_option_size": {
+      "message": "Size Filter"
+   },
+   "popup_option_size_max": {
+      "message": "Upper Limit"
+   },
+   "popup_option_size_min": {
+      "message": "Lower Limit"
+   },
+   "popup_option_size_tooltip": {
+      "message": "Resources with sizes below the lower limit or above the upper limit will not be captured. The unit is KB. Set to 0 for no limit."
+   },
+   "popup_option_tip": {
+      "message": "Tip Settings"
+   },
+   "popup_option_tip_block": {
+      "message": "Show tip when blocking domains"
+   },
+   "popup_option_tooltip": {
+      "message": "Resources from the following domains will not be captured"
+   },
+   "popup_play_tip": {
+      "message": "Some videos may not be captured if not played."
+   },
+   "popup_record": {
+      "message": "Record"
+   },
+   "popup_record_mode": {
+      "message": "Recording Mode"
+   },
+   "popup_record_mode_default": {
+      "message": "Set as Default Mode"
+   },
+   "popup_record_mode_default_tooltip": {
+      "message": "When recording videos on this website next time, the mode selected above will be used by default."
+   },
+   "popup_record_mode_error_tips": {
+      "message": "Please select a recording mode"
+   },
+   "popup_record_mode_mse": {
+      "message": "MSE (Buffer Mode)"
+   },
+   "popup_record_mode_mse_tooltip": {
+      "message": "Records the buffer of the player. Its advantage is that you can speed up the recording process by speeding up playback and skipping buffer segments. Its disadvantage is poorer compatibility, and it may not properly handle media streams with special structures."
+   },
+   "popup_record_mode_msr": {
+      "message": "MSR (Screen Recording Mode)"
+   },
+   "popup_record_mode_msr_tooltip": {
+      "message": "Records the screen and sound of the player. It has better compatibility than MSE, but its disadvantage is that you cannot speed up the recording process by speeding up playback or skipping buffer segments. It is recommended for live streams and videos that cannot be recorded using MSE."
+   },
+   "popup_record_mode_switch_tooltip": {
+      "message": "Switch Mode"
+   },
+   "popup_record_no_media_tips": {
+      "message": "No recordable video detected. If the video exists and is playable, please check if the video is muted and unmute it!"
+   },
+   "popup_record_start": {
+      "message": "Start Recording"
+   }
+}

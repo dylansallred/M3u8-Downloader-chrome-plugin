@@ -1,0 +1,155 @@
+{
+   "manifest_browser_action": {
+      "message": "FetchV"
+   },
+   "manifest_description": {
+      "message": "Il downloader di video per salvare video web e dirette streaming."
+   },
+   "manifest_name": {
+      "message": "FetchV - Scarica filmato/video streaming"
+   },
+   "modal_record": {
+      "message": "Registra"
+   },
+   "modal_record_end": {
+      "message": "Termina"
+   },
+   "modal_record_start": {
+      "message": "Inizia"
+   },
+   "popup_disable": {
+      "message": "Spiacenti, non possiamo scaricare i video di questa pagina per te."
+   },
+   "popup_disable_detail": {
+      "message": "Ulteriori dettagli"
+   },
+   "popup_home": {
+      "message": "Home"
+   },
+   "popup_inject_capture_no_video": {
+      "message": "Nessun video disponibile trovato!"
+   },
+   "popup_inject_capture_off": {
+      "message": "La cattura basata sul contenuto è attiva per questo sito"
+   },
+   "popup_inject_capture_on": {
+      "message": "Abilita la cattura basata sul contenuto per questo sito"
+   },
+   "popup_inject_capture_tooltip": {
+      "message": "Alcuni tipi speciali di playlist m3u8 potrebbero non essere rilevati automaticamente! Abilitando questa opzione, possono essere rilevati dal contenuto della pagina (se presenti). Nota: non abilitare questa opzione in condizioni normali, poiché potrebbe aumentare il consumo di risorse!"
+   },
+   "popup_item_block": {
+      "message": "Blocca tutte le risorse da questo dominio"
+   },
+   "popup_item_block_error": {
+      "message": "È possibile bloccare al massimo 30 domini!"
+   },
+   "popup_item_block_modal_btn_confirm": {
+      "message": "Conferma"
+   },
+   "popup_item_block_modal_content": {
+      "message": "Sei sicuro di voler bloccare tutte le risorse provenienti da questo dominio? Dopo il blocco, potrai gestire questa opzione nelle impostazioni."
+   },
+   "popup_item_block_modal_title": {
+      "message": "Blocca dominio"
+   },
+   "popup_item_block_success": {
+      "message": "Dominio bloccato con successo!"
+   },
+   "popup_item_copy": {
+      "message": "Copia link"
+   },
+   "popup_item_copy_error": {
+      "message": "Copia non riuscita!"
+   },
+   "popup_item_copy_success": {
+      "message": "Copia riuscita!"
+   },
+   "popup_item_download": {
+      "message": "Scarica"
+   },
+   "popup_item_play": {
+      "message": "Anteprima riproduzione"
+   },
+   "popup_no_resource": {
+      "message": "Nessuna risorsa disponibile"
+   },
+   "popup_no_resource_bottom": {
+      "message": "Se il contenuto desiderato non appare nell'elenco o se il download fallisce, prova le seguenti soluzioni."
+   },
+   "popup_no_resource_lead": {
+      "message": "Alcuni video potrebbero dover essere riprodotti prima di poter essere rilevati. Se la risorsa non viene rilevata dopo l'avvio della riproduzione, prova i seguenti metodi."
+   },
+   "popup_option": {
+      "message": "Impostazioni"
+   },
+   "popup_option_block": {
+      "message": "Blocca dominio"
+   },
+   "popup_option_block_empty": {
+      "message": "Nessun dominio bloccato"
+   },
+   "popup_option_setup_success": {
+      "message": "Impostazioni salvate con successo!"
+   },
+   "popup_option_size": {
+      "message": "Filtro dimensioni"
+   },
+   "popup_option_size_max": {
+      "message": "Limite superiore"
+   },
+   "popup_option_size_min": {
+      "message": "Limite inferiore"
+   },
+   "popup_option_size_tooltip": {
+      "message": "Le risorse con dimensioni inferiori al limite inferiore o superiori al limite superiore non verranno scaricate. Unità: KB, imposta a 0 per nessuna limitazione."
+   },
+   "popup_option_tip": {
+      "message": "Impostazione suggerimento"
+   },
+   "popup_option_tip_block": {
+      "message": "Mostra suggerimento durante il blocco del dominio"
+   },
+   "popup_option_tooltip": {
+      "message": "Le risorse provenienti dai seguenti domini non verranno scaricate."
+   },
+   "popup_play_tip": {
+      "message": "Alcuni video potrebbero essere scaricati solo se riprodotti."
+   },
+   "popup_record": {
+      "message": "Registra"
+   },
+   "popup_record_mode": {
+      "message": "Modalità di registrazione"
+   },
+   "popup_record_mode_default": {
+      "message": "Imposta come modalità predefinita"
+   },
+   "popup_record_mode_default_tooltip": {
+      "message": "La prossima volta che registri video su questo sito web, la modalità selezionata sopra verrà utilizzata per impostazione predefinita."
+   },
+   "popup_record_mode_error_tips": {
+      "message": "Seleziona una modalità di registrazione"
+   },
+   "popup_record_mode_mse": {
+      "message": "MSE (Modalità buffer)"
+   },
+   "popup_record_mode_mse_tooltip": {
+      "message": "Registra il buffer del lettore. Il suo vantaggio è che puoi accelerare il processo di registrazione accelerando la riproduzione e saltando i segmenti del buffer. Il suo svantaggio è una compatibilità inferiore e potrebbe non gestire correttamente i flussi multimediali con strutture speciali."
+   },
+   "popup_record_mode_msr": {
+      "message": "MSR (Modalità di registrazione dello schermo)"
+   },
+   "popup_record_mode_msr_tooltip": {
+      "message": "Registra lo schermo e l'audio del lettore. Ha una compatibilità migliore rispetto a MSE, ma il suo svantaggio è che non è possibile accelerare il processo di registrazione accelerando la riproduzione o saltando i segmenti del buffer. È consigliato per i live stream e i video che non possono essere registrati con MSE."
+   },
+   "popup_record_mode_switch_tooltip": {
+      "message": "Cambia modalità"
+   },
+   "popup_record_no_media_tips": {
+      "message": "Nessun video registrabile rilevato. Se il video esiste ed è riproducibile, controlla se il video è silenziato e riattiva l'audio!"
+   },
+   "popup_record_start": {
+      "message": "Inizia la registrazione"
+   }
+}

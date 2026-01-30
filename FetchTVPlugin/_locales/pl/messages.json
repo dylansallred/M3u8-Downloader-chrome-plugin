@@ -1,0 +1,155 @@
+{
+   "manifest_browser_action": {
+      "message": "FetchV"
+   },
+   "manifest_description": {
+      "message": "Pobieracz wideo do zapisywania filmów z sieci i transmisji na żywo."
+   },
+   "manifest_name": {
+      "message": "FetchV - Pobieracz mp4/wideo/filmów"
+   },
+   "modal_record": {
+      "message": "Nagrywaj"
+   },
+   "modal_record_end": {
+      "message": "Koniec"
+   },
+   "modal_record_start": {
+      "message": "Start"
+   },
+   "popup_disable": {
+      "message": "Przepraszamy, nie możemy pobrać filmów z tej strony dla Ciebie."
+   },
+   "popup_disable_detail": {
+      "message": "Więcej informacji"
+   },
+   "popup_home": {
+      "message": "Strona główna"
+   },
+   "popup_inject_capture_no_video": {
+      "message": "Nie znaleziono dostępnego wideo!"
+   },
+   "popup_inject_capture_off": {
+      "message": "Przechwytywanie na podstawie treści jest włączone dla tej witryny"
+   },
+   "popup_inject_capture_on": {
+      "message": "Włącz przechwytywanie na podstawie treści dla tej witryny"
+   },
+   "popup_inject_capture_tooltip": {
+      "message": "Niektóre specjalne typy playlist m3u8 mogą nie być automatycznie wykrywane! Włączenie tej opcji umożliwia ich wykrycie na podstawie zawartości strony (jeśli jest dostępna). Uwaga: Nie włączaj tej opcji w normalnych warunkach, ponieważ może to zwiększyć zużycie zasobów!"
+   },
+   "popup_item_block": {
+      "message": "Blokuj wszystkie zasoby z tej domeny"
+   },
+   "popup_item_block_error": {
+      "message": "Możesz zablokować maksymalnie 30 domen!"
+   },
+   "popup_item_block_modal_btn_confirm": {
+      "message": "Potwierdź"
+   },
+   "popup_item_block_modal_content": {
+      "message": "Czy na pewno chcesz zablokować wszystkie zasoby z tej domeny? Po zablokowaniu można zarządzać tą opcją w ustawieniach."
+   },
+   "popup_item_block_modal_title": {
+      "message": "Blokuj domenę"
+   },
+   "popup_item_block_success": {
+      "message": "Domena została zablokowana!"
+   },
+   "popup_item_copy": {
+      "message": "Skopiuj link"
+   },
+   "popup_item_copy_error": {
+      "message": "Nie można skopiować!"
+   },
+   "popup_item_copy_success": {
+      "message": "Skopiowano!"
+   },
+   "popup_item_download": {
+      "message": "Pobierz"
+   },
+   "popup_item_play": {
+      "message": "Odtwarzaj podgląd"
+   },
+   "popup_no_resource": {
+      "message": "Brak zasobów"
+   },
+   "popup_no_resource_bottom": {
+      "message": "Jeśli docelowe multimedia nie pojawiają się na liście lub pobieranie nie powiodło się, spróbuj następujących rozwiązań."
+   },
+   "popup_no_resource_lead": {
+      "message": "Niektóre filmy mogą wymagać odtworzenia, zanim zostaną wykryte. Jeśli po rozpoczęciu odtwarzania nadal nie można wykryć zasobu, spróbuj poniższych metod."
+   },
+   "popup_option": {
+      "message": "Opcje"
+   },
+   "popup_option_block": {
+      "message": "Blokuj domenę"
+   },
+   "popup_option_block_empty": {
+      "message": "Brak zablokowanych domen"
+   },
+   "popup_option_setup_success": {
+      "message": "Ustawienia zostały zapisane!"
+   },
+   "popup_option_size": {
+      "message": "Filtr rozmiaru"
+   },
+   "popup_option_size_max": {
+      "message": "Górny limit"
+   },
+   "popup_option_size_min": {
+      "message": "Dolny limit"
+   },
+   "popup_option_size_tooltip": {
+      "message": "Zasoby o rozmiarze poniżej dolnego limitu lub powyżej górnego limitu nie zostaną pobrane. Jednostka: KB, ustaw 0 dla braku ograniczeń."
+   },
+   "popup_option_tip": {
+      "message": "Wskazówka ustawień"
+   },
+   "popup_option_tip_block": {
+      "message": "Wyświetl wskazówkę podczas blokowania domeny"
+   },
+   "popup_option_tooltip": {
+      "message": "Zasoby z następujących domen nie będą pobierane."
+   },
+   "popup_play_tip": {
+      "message": "Niektóre filmy można pobrać tylko po ich odtworzeniu."
+   },
+   "popup_record": {
+      "message": "Nagrywanie"
+   },
+   "popup_record_mode": {
+      "message": "Tryb nagrywania"
+   },
+   "popup_record_mode_default": {
+      "message": "Ustaw jako tryb domyślny"
+   },
+   "popup_record_mode_default_tooltip": {
+      "message": "Następnym razem, gdy będziesz nagrywać filmy na tej stronie, domyślnie użyty zostanie tryb wybrany powyżej."
+   },
+   "popup_record_mode_error_tips": {
+      "message": "Wybierz tryb nagrywania"
+   },
+   "popup_record_mode_mse": {
+      "message": "MSE (Tryb bufora)"
+   },
+   "popup_record_mode_mse_tooltip": {
+      "message": "Nagrywa bufor odtwarzacza. Jego zaletą jest to, że można przyspieszyć proces nagrywania poprzez przyspieszenie odtwarzania i pomijanie segmentów bufora. Jego wadą jest gorsza kompatybilność i może nie być w stanie prawidłowo przetworzyć strumieni mediów o specjalnych strukturach."
+   },
+   "popup_record_mode_msr": {
+      "message": "MSR (Tryb nagrywania ekranu)"
+   },
+   "popup_record_mode_msr_tooltip": {
+      "message": "Nagrywa ekran i dźwięk odtwarzacza. Ma lepszą kompatybilność niż MSE, ale jego wadą jest to, że nie można przyspieszyć procesu nagrywania poprzez przyspieszenie odtwarzania lub pomijanie segmentów bufora. Zalecany jest do transmisji na żywo i filmów, których nie można nagrać za pomocą MSE."
+   },
+   "popup_record_mode_switch_tooltip": {
+      "message": "Zmień tryb"
+   },
+   "popup_record_no_media_tips": {
+      "message": "Nie wykryto żadnego wideo do nagrania. Jeśli wideo istnieje i jest odtwarzalne, sprawdź, czy nie jest wyciszone, i wyłącz wyciszenie!"
+   },
+   "popup_record_start": {
+      "message": "Rozpocznij nagrywanie"
+   }
+}

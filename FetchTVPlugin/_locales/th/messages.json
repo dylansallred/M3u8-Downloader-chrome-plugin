@@ -1,0 +1,155 @@
+{
+   "manifest_browser_action": {
+      "message": "FetchV"
+   },
+   "manifest_description": {
+      "message": "ตัวดาวน์โหลดวิดีโอสำหรับบันทึกวิดีโอบนเว็บและการถ่ายทอดสด"
+   },
+   "manifest_name": {
+      "message": "FetchV - โปรแกรมดาวน์โหลดวิดีโอ m3u8/hls"
+   },
+   "modal_record": {
+      "message": "บันทึก"
+   },
+   "modal_record_end": {
+      "message": "สิ้นสุด"
+   },
+   "modal_record_start": {
+      "message": "เริ่ม"
+   },
+   "popup_disable": {
+      "message": "ขออภัยเราไม่สามารถดาวน์โหลดวิดีโอในหน้านี้ให้คุณได้"
+   },
+   "popup_disable_detail": {
+      "message": "ดูรายละเอียด"
+   },
+   "popup_home": {
+      "message": "หน้าหลัก"
+   },
+   "popup_inject_capture_no_video": {
+      "message": "ไม่พบวิดีโอที่สามารถใช้งานได้!"
+   },
+   "popup_inject_capture_off": {
+      "message": "การจับตามเนื้อหาถูกเปิดใช้งานสำหรับเว็บไซต์นี้แล้ว"
+   },
+   "popup_inject_capture_on": {
+      "message": "เปิดใช้งานการจับตามเนื้อหาสำหรับเว็บไซต์นี้"
+   },
+   "popup_inject_capture_tooltip": {
+      "message": "รายการเล่น m3u8 บางประเภทอาจไม่สามารถตรวจจับได้โดยอัตโนมัติ! การเปิดใช้งานตัวเลือกนี้จะช่วยให้สามารถตรวจจับจากเนื้อหาหน้าเว็บได้ (หากมีอยู่) หมายเหตุ: ไม่ควรเปิดใช้งานตัวเลือกนี้ในสถานการณ์ปกติ เนื่องจากอาจทำให้ใช้ทรัพยากรมากขึ้น!"
+   },
+   "popup_item_block": {
+      "message": "บล็อกทรัพยากรทั้งหมดจากโดเมนนี้"
+   },
+   "popup_item_block_error": {
+      "message": "สามารถบล็อกได้เพียงสูงสุด 30 โดเมนเท่านั้น!"
+   },
+   "popup_item_block_modal_btn_confirm": {
+      "message": "ยืนยัน"
+   },
+   "popup_item_block_modal_content": {
+      "message": "คุณต้องการบล็อกทรัพยากรทั้งหมดที่มาจากโดเมนนี้หรือไม่? เมื่อบล็อกแล้ว คุณสามารถจัดการตัวเลือกนี้ในการตั้งค่าได้ในภายหลัง"
+   },
+   "popup_item_block_modal_title": {
+      "message": "บล็อกโดเมนนี้"
+   },
+   "popup_item_block_success": {
+      "message": "บล็อกโดเมนนี้สำเร็จ!"
+   },
+   "popup_item_copy": {
+      "message": "คัดลอกลิงก์"
+   },
+   "popup_item_copy_error": {
+      "message": "ไม่สามารถคัดลอกได้!"
+   },
+   "popup_item_copy_success": {
+      "message": "คัดลอกสำเร็จ!"
+   },
+   "popup_item_download": {
+      "message": "ดาวน์โหลด"
+   },
+   "popup_item_play": {
+      "message": "เล่นตัวอย่าง"
+   },
+   "popup_no_resource": {
+      "message": "ไม่มีทรัพยากร"
+   },
+   "popup_no_resource_bottom": {
+      "message": "หากไม่มีสื่อเป้าหมายของคุณในรายการ หรือไม่สามารถดาวน์โหลดได้ โปรดลองวิธีแก้ไขต่อไปนี้"
+   },
+   "popup_no_resource_lead": {
+      "message": "วิดีโอบางรายการอาจต้องเริ่มเล่นก่อนจึงจะสามารถตรวจจับได้ หากยังไม่สามารถจับแหล่งข้อมูลได้หลังจากเริ่มเล่นแล้ว โปรดลองวิธีต่อไปนี้"
+   },
+   "popup_option": {
+      "message": "ตั้งค่า"
+   },
+   "popup_option_block": {
+      "message": "บล็อกโดเมน"
+   },
+   "popup_option_block_empty": {
+      "message": "ไม่มีโดเมนที่ถูกบล็อก"
+   },
+   "popup_option_setup_success": {
+      "message": "ตั้งค่าสำเร็จ!"
+   },
+   "popup_option_size": {
+      "message": "ตัวกรองขนาด"
+   },
+   "popup_option_size_max": {
+      "message": "ลิมิตสูงสุด"
+   },
+   "popup_option_size_min": {
+      "message": "ลิมิตต่ำสุด"
+   },
+   "popup_option_size_tooltip": {
+      "message": "ไม่จะสามารถเก็บทรัพยากรที่มีขนาดต่ำกว่าลิมิตหรือสูงกว่าขีดจำกัด หน่วยเป็น KB ตั้งค่าเป็น 0 เพื่อไม่จำกัด"
+   },
+   "popup_option_tip": {
+      "message": "ตั้งค่าเคล็ดลับ"
+   },
+   "popup_option_tip_block": {
+      "message": "แสดงเคล็ดลับเมื่อบล็อกโดเมน"
+   },
+   "popup_option_tooltip": {
+      "message": "ทรัพยากรที่มาจากโดเมนต่อไปนี้จะไม่ถูกเก็บ"
+   },
+   "popup_play_tip": {
+      "message": "วิดีโอบางส่วนอาจไม่ถูกเก็บหากไม่ได้เล่น"
+   },
+   "popup_record": {
+      "message": "บันทึก"
+   },
+   "popup_record_mode": {
+      "message": "โหมดการบันทึก"
+   },
+   "popup_record_mode_default": {
+      "message": "ตั้งเป็นโหมดเริ่มต้น"
+   },
+   "popup_record_mode_default_tooltip": {
+      "message": "ครั้งต่อไปที่คุณบันทึกวิดีโอบนเว็บไซต์นี้ โหมดที่เลือกไว้ด้านบนจะถูกใช้เป็นค่าเริ่มต้น"
+   },
+   "popup_record_mode_error_tips": {
+      "message": "โปรดเลือกโหมดการบันทึก"
+   },
+   "popup_record_mode_mse": {
+      "message": "MSE (โหมดบัฟเฟอร์)"
+   },
+   "popup_record_mode_mse_tooltip": {
+      "message": "บันทึกบัฟเฟอร์ของเครื่องเล่น ข้อดีคือสามารถเร่งความเร็วในการบันทึกได้โดยการเร่งความเร็วในการเล่นและข้ามส่วนบัฟเฟอร์ ข้อเสียคือมีความเข้ากันได้ต่ำกว่า และอาจไม่สามารถจัดการสตรีมมีเดียที่มีโครงสร้างพิเศษได้อย่างถูกต้อง"
+   },
+   "popup_record_mode_msr": {
+      "message": "MSR (โหมดบันทึกหน้าจอ)"
+   },
+   "popup_record_mode_msr_tooltip": {
+      "message": "บันทึกหน้าจอและเสียงของเครื่องเล่น มีความเข้ากันได้ดีกว่า MSE แต่ข้อเสียคือไม่สามารถเร่งความเร็วในการบันทึกได้โดยการเร่งความเร็วในการเล่นหรือข้ามส่วนบัฟเฟอร์ ขอแนะนำสำหรับสตรีมสดและวิดีโอที่ไม่สามารถบันทึกได้ด้วย MSE"
+   },
+   "popup_record_mode_switch_tooltip": {
+      "message": "สลับโหมด"
+   },
+   "popup_record_no_media_tips": {
+      "message": "ไม่พบวิดีโอที่สามารถบันทึกได้ หากวิดีโอมีอยู่และเล่นได้ โปรดตรวจสอบว่าวิดีโอถูกปิดเสียงหรือไม่และเปิดเสียง!"
+   },
+   "popup_record_start": {
+      "message": "เริ่มบันทึก"
+   }
+}

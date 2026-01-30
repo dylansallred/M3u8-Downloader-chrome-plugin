@@ -1,0 +1,155 @@
+{
+   "manifest_browser_action": {
+      "message": "FetchV"
+   },
+   "manifest_description": {
+      "message": "Videote allalaadija veebivideote ja otseülekannete salvestamiseks."
+   },
+   "manifest_name": {
+      "message": "FetchV - m3u8/hls video allalaadija"
+   },
+   "modal_record": {
+      "message": "Salvesta"
+   },
+   "modal_record_end": {
+      "message": "Lõpeta"
+   },
+   "modal_record_start": {
+      "message": "Alusta"
+   },
+   "popup_disable": {
+      "message": "Kahjuks ei saa me sellelt lehelt videot alla laadida."
+   },
+   "popup_disable_detail": {
+      "message": "Lisateave"
+   },
+   "popup_home": {
+      "message": "Avaleht"
+   },
+   "popup_inject_capture_no_video": {
+      "message": "Ühtegi saadaolevat videot ei leitud!"
+   },
+   "popup_inject_capture_off": {
+      "message": "Sellel saidil on sisupõhine tuvastamine lubatud"
+   },
+   "popup_inject_capture_on": {
+      "message": "Luba sellel saidil sisupõhine tuvastamine"
+   },
+   "popup_inject_capture_tooltip": {
+      "message": "Teatud eriliiki m3u8-esitusloendeid ei pruugita automaatselt tuvastada! Selle valiku lubamine võimaldab tuvastada neid lehe sisust (kui need on olemas). Märkus: ära kasuta seda valikut tavatingimustes, kuna see võib suurendada ressursitarbimist!"
+   },
+   "popup_item_block": {
+      "message": "Blokeeri kõik ressursid sellelt domeenilt"
+   },
+   "popup_item_block_error": {
+      "message": "Saate blokeerida ainult kuni 30 domeeni!"
+   },
+   "popup_item_block_modal_btn_confirm": {
+      "message": "Kinnita"
+   },
+   "popup_item_block_modal_content": {
+      "message": "Kas olete kindel, et soovite blokeerida kõik ressursid sellelt domeenilt? Pärast blokeerimist saate selle seadeid haldama."
+   },
+   "popup_item_block_modal_title": {
+      "message": "Blokeeri see domeen"
+   },
+   "popup_item_block_success": {
+      "message": "Domeen on edukalt blokeeritud!"
+   },
+   "popup_item_copy": {
+      "message": "Kopeeri link"
+   },
+   "popup_item_copy_error": {
+      "message": "Kopeerimine ebaõnnestus!"
+   },
+   "popup_item_copy_success": {
+      "message": "Kopeerimine õnnestus!"
+   },
+   "popup_item_download": {
+      "message": "Laadi alla"
+   },
+   "popup_item_play": {
+      "message": "Esita eelvaade"
+   },
+   "popup_no_resource": {
+      "message": "Ressursse pole saadaval"
+   },
+   "popup_no_resource_bottom": {
+      "message": "Kui soovitud meediumit pole loendis või selle allalaadimine ebaõnnestub, proovige järgmisi lahendusi."
+   },
+   "popup_no_resource_lead": {
+      "message": "Mõne video tuvastamiseks võib olla vajalik see esmalt esitama hakata. Kui ressurssi ei õnnestu ka pärast taasesituse alustamist tabada, proovige järgmisi meetodeid."
+   },
+   "popup_option": {
+      "message": "Seaded"
+   },
+   "popup_option_block": {
+      "message": "Blokeeri domeen"
+   },
+   "popup_option_block_empty": {
+      "message": "Puuduvad blokeeritud domeenid"
+   },
+   "popup_option_setup_success": {
+      "message": "Seaded on edukalt salvestatud!"
+   },
+   "popup_option_size": {
+      "message": "Suuruse filter"
+   },
+   "popup_option_size_max": {
+      "message": "Maksimum"
+   },
+   "popup_option_size_min": {
+      "message": "Miinimum"
+   },
+   "popup_option_size_tooltip": {
+      "message": "Väiksema kui miinimum- või suurema kui maksimumsuurusega ressursse ei allalaadita. Suurus on märgitud kilobaitides (KB), seadistus 0 tähendab piiranguteta."
+   },
+   "popup_option_tip": {
+      "message": "Näpunäidete seaded"
+   },
+   "popup_option_tip_block": {
+      "message": "Kuva näpunäiteid domeenide blokeerimisel"
+   },
+   "popup_option_tooltip": {
+      "message": "Alljärgnevate domeenide ressursse ei allalaadita."
+   },
+   "popup_play_tip": {
+      "message": "Mõned videod tuleb enne allalaadimist esitada."
+   },
+   "popup_record": {
+      "message": "Salvesta"
+   },
+   "popup_record_mode": {
+      "message": "Salvestusrežiim"
+   },
+   "popup_record_mode_default": {
+      "message": "Määra vaikeväärtuseks"
+   },
+   "popup_record_mode_default_tooltip": {
+      "message": "Järgmine kord, kui sellel veebisaidil videoid salvestate, kasutatakse vaikimisi ülaltoodud režiimi."
+   },
+   "popup_record_mode_error_tips": {
+      "message": "Palun valige salvestusrežiim"
+   },
+   "popup_record_mode_mse": {
+      "message": "MSE (Puhvri režiim)"
+   },
+   "popup_record_mode_mse_tooltip": {
+      "message": "Salvestab pleieri puhvri. Selle eeliseks on, et saate salvestusprotsessi kiirendada taasesituse kiirendamise ja puhvri segmentide vahelejätmisega. Selle puuduseks on halvem ühilduvus ja see ei pruugi spetsiaalsete struktuuridega meediumivooge õigesti töödelda."
+   },
+   "popup_record_mode_msr": {
+      "message": "MSR (Ekraani salvestamise režiim)"
+   },
+   "popup_record_mode_msr_tooltip": {
+      "message": "Salvestab pleieri ekraani ja heli. Sellel on parem ühilduvus kui MSE-l, kuid selle puuduseks on see, et te ei saa salvestusprotsessi kiirendada taasesituse kiirendamise või puhvri segmentide vahelejätmisega. Seda soovitatakse otseülekannete ja videote jaoks, mida ei saa MSE-ga salvestada."
+   },
+   "popup_record_mode_switch_tooltip": {
+      "message": "Vaheta režiimi"
+   },
+   "popup_record_no_media_tips": {
+      "message": "Salvestatavat videot ei tuvastatud. Kui video on olemas ja esitatav, kontrollige, kas video on vaigistatud, ja lülitage vaigistus välja!"
+   },
+   "popup_record_start": {
+      "message": "Alusta salvestamist"
+   }
+}

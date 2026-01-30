@@ -1,0 +1,155 @@
+{
+   "manifest_browser_action": {
+      "message": "FetchV"
+   },
+   "manifest_description": {
+      "message": "Der Video-Downloader zum Speichern von Webvideos und Livestreams."
+   },
+   "manifest_name": {
+      "message": "FetchV - Web filme/videos downloaden"
+   },
+   "modal_record": {
+      "message": "Aufnahme"
+   },
+   "modal_record_end": {
+      "message": "Ende"
+   },
+   "modal_record_start": {
+      "message": "Start"
+   },
+   "popup_disable": {
+      "message": "Leider können wir das Video von dieser Seite nicht herunterladen."
+   },
+   "popup_disable_detail": {
+      "message": "Weitere Informationen"
+   },
+   "popup_home": {
+      "message": "Startseite"
+   },
+   "popup_inject_capture_no_video": {
+      "message": "Kein verfügbares Video gefunden!"
+   },
+   "popup_inject_capture_off": {
+      "message": "Inhaltsbasiertes Erfassen ist für diese Website aktiviert"
+   },
+   "popup_inject_capture_on": {
+      "message": "Inhaltsbasiertes Erfassen für diese Website aktivieren"
+   },
+   "popup_inject_capture_tooltip": {
+      "message": "Bestimmte spezielle m3u8-Playlisten werden möglicherweise nicht automatisch erkannt! Durch Aktivieren dieser Option können sie aus dem Seiteninhalt erkannt werden (falls vorhanden). Hinweis: Aktivieren Sie diese Option nur bei Bedarf, um zusätzlichen Ressourcenverbrauch zu vermeiden!"
+   },
+   "popup_item_block": {
+      "message": "Alle Ressourcen von dieser Domain blockieren"
+   },
+   "popup_item_block_error": {
+      "message": "Sie können bis zu 30 Domains blockieren!"
+   },
+   "popup_item_block_modal_btn_confirm": {
+      "message": "Bestätigen"
+   },
+   "popup_item_block_modal_content": {
+      "message": "Sind Sie sicher, dass Sie alle Ressourcen von dieser Domain blockieren möchten? Nach der Blockierung können Sie diese Einstellung in den Einstellungen verwalten."
+   },
+   "popup_item_block_modal_title": {
+      "message": "Domain blockieren"
+   },
+   "popup_item_block_success": {
+      "message": "Domain erfolgreich blockiert!"
+   },
+   "popup_item_copy": {
+      "message": "Link kopieren"
+   },
+   "popup_item_copy_error": {
+      "message": "Fehler beim Kopieren!"
+   },
+   "popup_item_copy_success": {
+      "message": "Kopieren erfolgreich!"
+   },
+   "popup_item_download": {
+      "message": "Herunterladen"
+   },
+   "popup_item_play": {
+      "message": "Vorschau abspielen"
+   },
+   "popup_no_resource": {
+      "message": "Keine Ressourcen verfügbar"
+   },
+   "popup_no_resource_bottom": {
+      "message": "Wenn das gewünschte Medium nicht in der Liste erscheint oder der Download fehlschlägt, versuchen Sie die folgenden Lösungen."
+   },
+   "popup_no_resource_lead": {
+      "message": "Einige Videos müssen möglicherweise erst abgespielt werden, bevor sie erkannt werden können. Wenn die Ressource nach dem Abspielen weiterhin nicht erkannt wird, versuchen Sie folgende Methoden."
+   },
+   "popup_option": {
+      "message": "Einstellungen"
+   },
+   "popup_option_block": {
+      "message": "Domain blockieren"
+   },
+   "popup_option_block_empty": {
+      "message": "Keine blockierten Domains"
+   },
+   "popup_option_setup_success": {
+      "message": "Die Einstellungen wurden erfolgreich gespeichert!"
+   },
+   "popup_option_size": {
+      "message": "Größenfilter"
+   },
+   "popup_option_size_max": {
+      "message": "Maximum"
+   },
+   "popup_option_size_min": {
+      "message": "Minimum"
+   },
+   "popup_option_size_tooltip": {
+      "message": "Ressourcen mit einer Größe unter dem Minimum oder über dem Maximum werden nicht heruntergeladen. Die Größe wird in KB angegeben, die Einstellung 0 bedeutet keine Begrenzung."
+   },
+   "popup_option_tip": {
+      "message": "Hinweis-Einstellungen"
+   },
+   "popup_option_tip_block": {
+      "message": "Hinweise bei Blockierung von Domains anzeigen"
+   },
+   "popup_option_tooltip": {
+      "message": "Ressourcen von den folgenden Domains werden nicht heruntergeladen."
+   },
+   "popup_play_tip": {
+      "message": "Einige Videos müssen abgespielt werden, um sie herunterzuladen."
+   },
+   "popup_record": {
+      "message": "Aufnehmen"
+   },
+   "popup_record_mode": {
+      "message": "Aufnahmemodus"
+   },
+   "popup_record_mode_default": {
+      "message": "Als Standardmodus festlegen"
+   },
+   "popup_record_mode_default_tooltip": {
+      "message": "Wenn Sie das nächste Mal Videos auf dieser Website aufnehmen, wird standardmäßig der oben ausgewählte Modus verwendet."
+   },
+   "popup_record_mode_error_tips": {
+      "message": "Bitte wählen Sie einen Aufnahmemodus aus"
+   },
+   "popup_record_mode_mse": {
+      "message": "MSE (Puffermodus)"
+   },
+   "popup_record_mode_mse_tooltip": {
+      "message": "Nimmt den Puffer des Players auf. Sein Vorteil ist, dass Sie den Aufnahmeprozess durch Beschleunigen der Wiedergabe und Überspringen von Pufferelementen beschleunigen können. Sein Nachteil ist die schlechtere Kompatibilität, und es kann Mediendatenströme mit speziellen Strukturen möglicherweise nicht korrekt verarbeiten."
+   },
+   "popup_record_mode_msr": {
+      "message": "MSR (Bildschirmaufnahmemodus)"
+   },
+   "popup_record_mode_msr_tooltip": {
+      "message": "Nimmt den Bildschirm und den Ton des Players auf. Die Kompatibilität ist besser als bei MSE, der Nachteil ist jedoch, dass Sie den Aufnahmeprozess nicht beschleunigen können, indem Sie die Wiedergabe beschleunigen oder Pufferelemente überspringen. Empfohlen für Live-Streams und Videos, die nicht mit MSE aufgenommen werden können."
+   },
+   "popup_record_mode_switch_tooltip": {
+      "message": "Modus wechseln"
+   },
+   "popup_record_no_media_tips": {
+      "message": "Kein aufnehmbares Video erkannt. Falls das Video existiert und abspielbar ist, prüfen Sie bitte, ob der Ton stummgeschaltet ist, und heben Sie die Stummschaltung auf!"
+   },
+   "popup_record_start": {
+      "message": "Aufnahme starten"
+   }
+}

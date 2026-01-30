@@ -1,0 +1,155 @@
+{
+   "manifest_browser_action": {
+      "message": "FetchV"
+   },
+   "manifest_description": {
+      "message": "Video-nedlasteren for å lagre nettvideoer og direktesendinger."
+   },
+   "manifest_name": {
+      "message": "FetchV - Video-nedlaster m3u8/hls"
+   },
+   "modal_record": {
+      "message": "Opptak"
+   },
+   "modal_record_end": {
+      "message": "Slutt"
+   },
+   "modal_record_start": {
+      "message": "Start"
+   },
+   "popup_disable": {
+      "message": "Beklager, vi kan ikke laste ned videoene på denne siden for deg."
+   },
+   "popup_disable_detail": {
+      "message": "Mer informasjon"
+   },
+   "popup_home": {
+      "message": "Hjem"
+   },
+   "popup_inject_capture_no_video": {
+      "message": "Ingen tilgjengelig video funnet!"
+   },
+   "popup_inject_capture_off": {
+      "message": "Innholdsbasert opptak er aktivert for dette nettstedet"
+   },
+   "popup_inject_capture_on": {
+      "message": "Aktiver innholdsbasert opptak for dette nettstedet"
+   },
+   "popup_inject_capture_tooltip": {
+      "message": "Noen spesielle typer m3u8-spillelister kan hende ikke oppdages automatisk! Aktivering av dette alternativet gjør det mulig å oppdage dem fra sidens innhold (hvis tilgjengelig). Merk: Ikke aktiver dette alternativet under normale omstendigheter, da det kan bruke flere systemressurser!"
+   },
+   "popup_item_block": {
+      "message": "Blokker alle ressurser fra dette domenet"
+   },
+   "popup_item_block_error": {
+      "message": "Du kan blokkere maksimalt 30 domener!"
+   },
+   "popup_item_block_modal_btn_confirm": {
+      "message": "Bekreft"
+   },
+   "popup_item_block_modal_content": {
+      "message": "Er du sikker på at du vil blokkere alle ressurser fra dette domenet? Etter blokkeringen kan du administrere denne innstillingen i innstillingene."
+   },
+   "popup_item_block_modal_title": {
+      "message": "Blokker domene"
+   },
+   "popup_item_block_success": {
+      "message": "Domenet ble blokkert!"
+   },
+   "popup_item_copy": {
+      "message": "Kopier lenke"
+   },
+   "popup_item_copy_error": {
+      "message": "Kunne ikke kopiere!"
+   },
+   "popup_item_copy_success": {
+      "message": "Kopiert!"
+   },
+   "popup_item_download": {
+      "message": "Last ned"
+   },
+   "popup_item_play": {
+      "message": "Forhåndsvisning avspilling"
+   },
+   "popup_no_resource": {
+      "message": "Ingen ressurser tilgjengelig"
+   },
+   "popup_no_resource_bottom": {
+      "message": "Hvis mediefilen du ønsker ikke vises i listen, eller nedlastingen mislykkes, kan du prøve følgende løsninger."
+   },
+   "popup_no_resource_lead": {
+      "message": "Noen videoer må kanskje spilles av før de kan oppdages. Hvis ressursen fortsatt ikke fanges etter avspilling, prøv følgende metoder."
+   },
+   "popup_option": {
+      "message": "Innstillinger"
+   },
+   "popup_option_block": {
+      "message": "Blokker domene"
+   },
+   "popup_option_block_empty": {
+      "message": "Ingen blokkerte domener"
+   },
+   "popup_option_setup_success": {
+      "message": "Innstillinger lagret!"
+   },
+   "popup_option_size": {
+      "message": "Størrelsesfilter"
+   },
+   "popup_option_size_max": {
+      "message": "Øvre grense"
+   },
+   "popup_option_size_min": {
+      "message": "Nedre grense"
+   },
+   "popup_option_size_tooltip": {
+      "message": "Ressurser med størrelse under nedre grense eller over øvre grense vil ikke bli lastet ned. Enhet: KB, sett til 0 for ingen begrensning."
+   },
+   "popup_option_tip": {
+      "message": "Tipsinnstilling"
+   },
+   "popup_option_tip_block": {
+      "message": "Vis tips under blokkering av domene"
+   },
+   "popup_option_tooltip": {
+      "message": "Ressurser fra følgende domener blir ikke lastet ned."
+   },
+   "popup_play_tip": {
+      "message": "Noen videoer kan bare lastes ned hvis de blir spilt av."
+   },
+   "popup_record": {
+      "message": "Opptak"
+   },
+   "popup_record_mode": {
+      "message": "Opptaksmodus"
+   },
+   "popup_record_mode_default": {
+      "message": "Angi som standardmodus"
+   },
+   "popup_record_mode_default_tooltip": {
+      "message": "Neste gang du tar opp videoer på denne nettsiden, vil modusen som er valgt ovenfor, bli brukt som standard."
+   },
+   "popup_record_mode_error_tips": {
+      "message": "Vennligst velg en opptaksmodus"
+   },
+   "popup_record_mode_mse": {
+      "message": "MSE (Buffermodus)"
+   },
+   "popup_record_mode_mse_tooltip": {
+      "message": "Tar opp bufferen til spilleren. Fordelen er at du kan fremskynde opptaksprosessen ved å øke avspillingshastigheten og hoppe over buffersegmenter. Ulempen er dårligere kompatibilitet, og den kan muligens ikke behandle mediestrømmer med spesielle strukturer riktig."
+   },
+   "popup_record_mode_msr": {
+      "message": "MSR (Skjermopptaksmodus)"
+   },
+   "popup_record_mode_msr_tooltip": {
+      "message": "Tar opp skjermen og lyden fra spilleren. Den har bedre kompatibilitet enn MSE, men ulempen er at du ikke kan fremskynde opptaksprosessen ved å øke avspillingshastigheten eller hoppe over buffersegmenter. Det anbefales for direktesendinger og videoer som ikke kan tas opp med MSE."
+   },
+   "popup_record_mode_switch_tooltip": {
+      "message": "Bytt modus"
+   },
+   "popup_record_no_media_tips": {
+      "message": "Ingen videoer som kan tas opp, ble funnet. Hvis videoen finnes og kan spilles av, sjekk om videoen er dempet og opphev dempingen!"
+   },
+   "popup_record_start": {
+      "message": "Start opptak"
+   }
+}

@@ -1,0 +1,155 @@
+{
+   "manifest_browser_action": {
+      "message": "FetchV"
+   },
+   "manifest_description": {
+      "message": "Videonedladdare för att spara webbvideor och liveströmmar."
+   },
+   "manifest_name": {
+      "message": "FetchV - Nedladdare av m3u8/hls-videor"
+   },
+   "modal_record": {
+      "message": "Spela in"
+   },
+   "modal_record_end": {
+      "message": "Slut"
+   },
+   "modal_record_start": {
+      "message": "Starta"
+   },
+   "popup_disable": {
+      "message": "Tyvärr kan vi inte ladda ner videor från den här sidan för dig."
+   },
+   "popup_disable_detail": {
+      "message": "Mer information"
+   },
+   "popup_home": {
+      "message": "Hem"
+   },
+   "popup_inject_capture_no_video": {
+      "message": "Ingen tillgänglig video hittades!"
+   },
+   "popup_inject_capture_off": {
+      "message": "Innehållsbaserad fångst är aktiverad för denna webbplats"
+   },
+   "popup_inject_capture_on": {
+      "message": "Aktivera innehållsbaserad fångst för denna webbplats"
+   },
+   "popup_inject_capture_tooltip": {
+      "message": "Vissa speciella typer av m3u8-spellistor kanske inte upptäcks automatiskt! Genom att aktivera detta alternativ kan de identifieras från sidans innehåll (om tillgängligt). Obs: Aktivera inte detta alternativ under normala omständigheter, eftersom det kan använda mer systemresurser!"
+   },
+   "popup_item_block": {
+      "message": "Blockera alla resurser från denna domän"
+   },
+   "popup_item_block_error": {
+      "message": "Du kan blockera högst 30 domäner!"
+   },
+   "popup_item_block_modal_btn_confirm": {
+      "message": "Bekräfta"
+   },
+   "popup_item_block_modal_content": {
+      "message": "Är du säker på att du vill blockera alla resurser från denna domän? Efter blockering kan du hantera detta alternativ i inställningarna."
+   },
+   "popup_item_block_modal_title": {
+      "message": "Blockera domän"
+   },
+   "popup_item_block_success": {
+      "message": "Domänen har blockerats!"
+   },
+   "popup_item_copy": {
+      "message": "Kopiera länk"
+   },
+   "popup_item_copy_error": {
+      "message": "Fel vid kopiering!"
+   },
+   "popup_item_copy_success": {
+      "message": "Kopierades framgångsrikt!"
+   },
+   "popup_item_download": {
+      "message": "Ladda ner"
+   },
+   "popup_item_play": {
+      "message": "Spela upp förhandsvisning"
+   },
+   "popup_no_resource": {
+      "message": "Inga tillgängliga resurser"
+   },
+   "popup_no_resource_bottom": {
+      "message": "Om ditt önskade media inte visas i listan eller om nedladdningen misslyckas, prova följande lösningar."
+   },
+   "popup_no_resource_lead": {
+      "message": "Vissa videor måste kanske spelas upp innan de kan upptäckas. Om resursen inte fångas efter uppspelning, prova följande metoder."
+   },
+   "popup_option": {
+      "message": "Inställningar"
+   },
+   "popup_option_block": {
+      "message": "Blockera domän"
+   },
+   "popup_option_block_empty": {
+      "message": "Ingen blockerad domän"
+   },
+   "popup_option_setup_success": {
+      "message": "Inställningarna har sparats!"
+   },
+   "popup_option_size": {
+      "message": "Filstorleksfilter"
+   },
+   "popup_option_size_max": {
+      "message": "Övre gräns"
+   },
+   "popup_option_size_min": {
+      "message": "Nedre gräns"
+   },
+   "popup_option_size_tooltip": {
+      "message": "Resurser med storlek under nedre gränsen eller över övre gränsen kommer inte att laddas ner. Enhet: KB, ställ in på 0 för att inte ha några begränsningar."
+   },
+   "popup_option_tip": {
+      "message": "Tipsinställningar"
+   },
+   "popup_option_tip_block": {
+      "message": "Visa tips när domän blockeras"
+   },
+   "popup_option_tooltip": {
+      "message": "Resurser från följande domäner kommer inte att laddas ner."
+   },
+   "popup_play_tip": {
+      "message": "Vissa videor kan endast laddas ner efter uppspelning."
+   },
+   "popup_record": {
+      "message": "Spela in"
+   },
+   "popup_record_mode": {
+      "message": "Inspelningsläge"
+   },
+   "popup_record_mode_default": {
+      "message": "Ställ in som standardläge"
+   },
+   "popup_record_mode_default_tooltip": {
+      "message": "Nästa gång du spelar in videor på denna webbplats, kommer läget som valts ovan att användas som standard."
+   },
+   "popup_record_mode_error_tips": {
+      "message": "Välj ett inspelningsläge"
+   },
+   "popup_record_mode_mse": {
+      "message": "MSE (Buffertläge)"
+   },
+   "popup_record_mode_mse_tooltip": {
+      "message": "Spelar in spelarens buffert. Fördelen är att du kan påskynda inspelningsprocessen genom att påskynda uppspelningen och hoppa över buffertsegment. Nackdelen är sämre kompatibilitet, och den kanske inte hanterar medieströmmar med speciella strukturer korrekt."
+   },
+   "popup_record_mode_msr": {
+      "message": "MSR (Skärminspelningsläge)"
+   },
+   "popup_record_mode_msr_tooltip": {
+      "message": "Spelar in spelarens skärm och ljud. Det har bättre kompatibilitet än MSE, men nackdelen är att du inte kan påskynda inspelningsprocessen genom att påskynda uppspelningen eller hoppa över buffertsegment. Det rekommenderas för livestreamar och videor som inte kan spelas in med MSE."
+   },
+   "popup_record_mode_switch_tooltip": {
+      "message": "Byt läge"
+   },
+   "popup_record_no_media_tips": {
+      "message": "Ingen inspelningsbar video hittades. Om videon finns och kan spelas, kontrollera om den är tystad och slå på ljudet!"
+   },
+   "popup_record_start": {
+      "message": "Börja spela in"
+   }
+}

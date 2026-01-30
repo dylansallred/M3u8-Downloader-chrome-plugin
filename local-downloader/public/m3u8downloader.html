@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Local HLS Downloader</title>
+  <link rel="stylesheet" href="/css/downloader.css" />
+</head>
+<body>
+  <div class="background-slideshow" id="backgroundSlideshow"></div>
+  <div class="app-container">
+  <div class="app-root">
+    <section id="taskBanner" class="task-banner hidden">
+      <span id="taskLoadedBadge" class="task-badge">Task loaded from extension  ready to start</span>
+    </section>
+
+    <header class="app-header">
+      <div class="file-icon">
+        <div class="file-thumb-wrapper" id="fileThumbnailWrapper">
+        </div>
+      </div>
+      <div class="file-meta">
+        <div class="file-name-label-row">
+          <div class="file-name-label">File Name</div>
+          <div class="file-icon-inner" id="fileTypeLabel"></div>
+        </div>
+        <div class="file-name-edit">
+          <input id="fileNameInput" class="file-name-input" type="text" placeholder="Untitled" />
+        </div>
+      </div>
+    </header>
+
+    <section class="status-bar">
+      <div class="status-item" id="segmentStatus">0/0</div>
+      <div class="status-item" id="sizeStatus">0 MB</div>
+      <div class="status-item" id="speedStatus">0 KB/s</div>
+      <div class="status-item" id="etaStatus">ETA: --</div>
+    </section>
+
+    <div class="progress-bar-container">
+      <div class="progress-bar-fill" id="progressBarFill">
+        <div class="progress-bar-shimmer"></div>
+      </div>
+      <div class="progress-bar-text" id="progressBarText">0%</div>
+    </div>
+
+    <section class="controls">
+      <button id="stopBtn" class="control-button danger" title="Stop">✕</button>
+      <button id="playPauseBtn" class="control-button primary" title="Start / Pause">▶</button>
+      <button id="settingsToggle" class="control-button" title="Settings">⚙</button>
+    </section>
+
+    <section id="settingsPanel" class="settings-panel hidden">
+      <header class="settings-header">
+        <h2>Download Settings</h2>
+        <button id="closeSettings" class="icon-button" title="Close">✕</button>
+      </header>
+
+      <div class="settings-group">
+        <label class="settings-label">Download Threads</label>
+        <div class="thread-buttons">
+          <button data-threads="1" class="chip-button">1</button>
+          <button data-threads="3" class="chip-button">3</button>
+          <button data-threads="6" class="chip-button">6</button>
+          <button data-threads="8" class="chip-button">8</button>
+          <button data-threads="10" class="chip-button">10</button>
+          <button data-threads="12" class="chip-button">12</button>
+          <button data-threads="16" class="chip-button">16</button>
+        </div>
+      </div>
+
+      <div class="settings-group">
+        <label class="settings-label">Auto Save</label>
+        <label class="switch">
+          <input type="checkbox" id="autoSaveToggle" />
+          <span class="slider"></span>
+        </label>
+      </div>
+
+      <div class="settings-group">
+        <label class="settings-label">Clear Cache</label>
+        <label class="switch">
+          <input type="checkbox" id="clearCacheToggle" checked />
+          <span class="slider"></span>
+        </label>
+      </div>
+
+      <div class="settings-group">
+        <label class="settings-label">Tab Progress</label>
+        <label class="switch">
+          <input type="checkbox" id="tabProgressToggle" checked />
+          <span class="slider"></span>
+        </label>
+      </div>
+
+      <div class="settings-group">
+        <label class="settings-label">Retry Attempts</label>
+        <select id="retryAttemptsSelect" class="select-input">
+          <option value="1">1 (no retry)</option>
+          <option value="2">2 attempts</option>
+          <option value="3">3 attempts</option>
+          <option value="4">4 attempts</option>
+          <option value="5">5 attempts</option>
+          <option value="10">10 attempts</option>
+          <option value="30">30 attempts</option>
+          <option value="infinite" selected>Infinite (keep retrying)</option>
+        </select>
+      </div>
+
+      <div class="settings-group">
+        <label class="settings-label">Resolution</label>
+        <div class="resolution-row">
+          <select id="resolutionSelect" class="select-input">
+            <option value="auto">Auto</option>
+            <option value="1080p">1080p</option>
+            <option value="720p">720p</option>
+            <option value="480p">480p</option>
+          </select>
+          <label class="switch small">
+            <input type="checkbox" id="resolutionDefaultToggle" />
+            <span class="slider"></span>
+          </label>
+          <span class="switch-label">Default</span>
+        </div>
+      </div>
+
+      <div class="settings-group">
+        <label class="settings-label">File Naming</label>
+        <div class="radio-row">
+          <label class="radio-option">
+            <input type="radio" name="fileNaming" value="title" checked />
+            <span>Webpage Title</span>
+          </label>
+          <label class="radio-option">
+            <input type="radio" name="fileNaming" value="resource" />
+            <span>Resource Filename</span>
+          </label>
+        </div>
+      </div>
+    </section>
+
+    <footer class="app-footer">
+      <div class="status-message-container">
+        <span class="status-icon" id="statusIcon">⏸</span>
+        <div id="statusMessage" class="status-message">
+          Waiting for task from extension...
+        </div>
+      </div>
+      <button id="downloadFileBtn" class="secondary-button hidden">Download File</button>
+    </footer>
+
+    <section class="display-options">
+      <div class="display-options-header">
+        <span class="display-options-title">Display Options</span>
+        <div class="header-buttons">
+          <button id="threadToggleBtn" class="thread-toggle-btn" title="Show/Hide threads">Threads</button>
+          <button id="segmentVizToggleBtn" class="thread-toggle-btn" title="Toggle segment map">Segments</button>
+          <button id="statsToggleBtn" class="thread-toggle-btn" title="Toggle statistics">Stats</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="threadStatus" class="thread-status">
+      <div class="thread-status-header">
+        <span class="thread-status-title">Threads</span>
+      </div>
+      <div id="threadStatusList" class="thread-status-list"></div>
+    </section>
+
+    <section id="segmentVisualization" class="segment-visualization hidden">
+      <div class="segment-viz-header">
+        <span class="segment-viz-title">Segment Map</span>
+      </div>
+      <div id="segmentGrid" class="segment-grid"></div>
+      <div class="segment-legend">
+        <div class="legend-item">
+          <div class="legend-color legend-pending"></div>
+          <span class="legend-label">Pending</span>
+        </div>
+        <div class="legend-item">
+          <div class="legend-color legend-downloading"></div>
+          <span class="legend-label">Downloading</span>
+        </div>
+        <div class="legend-item">
+          <div class="legend-color legend-skipped"></div>
+          <span class="legend-label">Skipped</span>
+        </div>
+        <div class="legend-item">
+          <div class="legend-color legend-completed"></div>
+          <span class="legend-label">Completed</span>
+        </div>
+        <div class="legend-item">
+          <div class="legend-color legend-failed"></div>
+          <span class="legend-label">Failed</span>
+        </div>
+        <div class="legend-item legend-retry-gradient">
+          <span class="legend-label">Retry intensity</span>
+          <div class="retry-gradient-wrapper">
+            <div class="retry-gradient-bar"></div>
+            <div class="retry-gradient-ticks">
+              <span class="retry-tick">2-4</span>
+              <span class="retry-tick">5-7</span>
+              <span class="retry-tick">8-10</span>
+              <span class="retry-tick">11-14</span>
+              <span class="retry-tick">15+</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="statsPanel" class="stats-panel hidden">
+      <div class="stats-header">
+        <span class="stats-title">Download Statistics</span>
+      </div>
+      <div class="stats-content">
+        <div class="stat-row">
+          <span class="stat-label">Average Speed</span>
+          <span class="stat-value" id="avgSpeed">0 KB/s</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">Peak Speed</span>
+          <span class="stat-value" id="peakSpeed">0 KB/s</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">Time Elapsed</span>
+          <span class="stat-value" id="timeElapsed">0s</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">Failed Segments</span>
+          <span class="stat-value" id="failedCount">0</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">Retry Attempts</span>
+          <span class="stat-value" id="retryCount">0</span>
+        </div>
+      </div>
+    </section>
+
+  </div>
+
+  <button id="sidePanelHandle" type="button" class="side-panel-handle" title="Toggle Queue/History" aria-label="Toggle Queue/History" aria-expanded="true">
+    <span class="handle-grip"></span>
+  </button>
+
+  <!-- Side Panel for Queue and History -->
+  <div class="side-panel" id="sidePanel">
+    <div class="side-panel-header">
+      <div class="side-panel-tabs">
+        <button id="queueTabBtn" class="side-panel-tab active" data-tab="queue">Queue</button>
+        <button id="historyTabBtn" class="side-panel-tab" data-tab="history">History</button>
+      </div>
+      <button id="sidePanelClose" class="side-panel-close" title="Close panel">✕</button>
+    </div>
+
+    <section id="queuePanel" class="queue-panel">
+      <div class="queue-header">
+        <span class="queue-title">Download Queue</span>
+        <div class="queue-stats">
+          <span id="queueCount" class="queue-stat">0 queued</span>
+          <span id="queueActive" class="queue-stat">0 active</span>
+        </div>
+      </div>
+      <div id="queueList" class="queue-list"></div>
+      <div class="queue-controls">
+        <button id="queueStartAll" class="queue-btn">Start All</button>
+        <button id="queuePauseAll" class="queue-btn">Pause All</button>
+        <button id="queueClearCompleted" class="queue-btn">Clear Completed</button>
+      </div>
+      <div class="queue-settings">
+        <div class="queue-settings-row">
+          <label class="queue-settings-label">Max Concurrent:</label>
+          <select id="queueMaxConcurrent" class="queue-settings-select">
+            <option value="1">1 download</option>
+            <option value="2">2 downloads</option>
+            <option value="3">3 downloads</option>
+          </select>
+        </div>
+        <div class="queue-settings-row">
+          <label class="queue-settings-label">Auto Start:</label>
+          <label class="switch small">
+            <input type="checkbox" id="queueAutoStart" checked />
+            <span class="slider"></span>
+          </label>
+        </div>
+      </div>
+    </section>
+
+    <section id="historyPanel" class="history-panel hidden">
+      <div class="history-header">
+        <div class="history-title-group">
+          <span class="history-title">Download History</span>
+          <span class="history-subtitle">Recently saved files on this machine</span>
+        </div>
+        <button id="historyClearAll" class="history-btn danger" type="button">Delete All</button>
+      </div>
+      <div id="historyEmpty" class="history-empty hidden">No previous downloads found.</div>
+      <ul id="historyList" class="history-list"></ul>
+      <div id="historyPlayer" class="history-player hidden">
+        <button id="historyPlayerClose" class="history-player-close" title="Close player">✕</button>
+        <video id="historyVideo" controls></video>
+      </div>
+    </section>
+  </div>
+
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+  <script type="module" src="/js/ui-entry.js"></script>
+</body>
+</html>
