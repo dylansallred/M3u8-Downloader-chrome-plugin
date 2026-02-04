@@ -1,5 +1,10 @@
 const logger = require('../utils/logger');
-const { queueMoveValidation, queueSettingsValidation } = require('../utils/validators');
+const {
+  queueMoveValidation,
+  queueSettingsValidation,
+  jobIdValidation,
+  renameTitleValidation
+} = require('../utils/validators');
 
 function registerQueueRoutes(app, queueManager) {
   // GET /api/queue - Get all jobs in queue
@@ -15,13 +20,9 @@ function registerQueueRoutes(app, queueManager) {
   });
 
   // POST /api/queue/:id/rename - Update job title/download name
-  app.post('/api/queue/:id/rename', (req, res) => {
+  app.post('/api/queue/:id/rename', [...jobIdValidation, ...renameTitleValidation], (req, res) => {
     const jobId = req.params.id;
     const { title } = req.body || {};
-
-    if (typeof title !== 'string' || !title.trim()) {
-      return res.status(400).json({ error: 'Title is required' });
-    }
 
     const success = queueManager.renameJob(jobId, title.trim());
 
@@ -34,7 +35,7 @@ function registerQueueRoutes(app, queueManager) {
   });
 
   // POST /api/queue/:id/pause - Pause a job
-  app.post('/api/queue/:id/pause', (req, res) => {
+  app.post('/api/queue/:id/pause', jobIdValidation, (req, res) => {
     const jobId = req.params.id;
     const success = queueManager.pauseJob(jobId);
   
@@ -47,7 +48,7 @@ function registerQueueRoutes(app, queueManager) {
   });
 
   // POST /api/queue/:id/resume - Resume a paused job
-  app.post('/api/queue/:id/resume', (req, res) => {
+  app.post('/api/queue/:id/resume', jobIdValidation, (req, res) => {
     const jobId = req.params.id;
     const success = queueManager.resumeJob(jobId);
   
@@ -60,7 +61,7 @@ function registerQueueRoutes(app, queueManager) {
   });
 
   // POST /api/queue/:id/start - Manually start a queued/paused job (respects maxConcurrent)
-  app.post('/api/queue/:id/start', (req, res) => {
+  app.post('/api/queue/:id/start', jobIdValidation, (req, res) => {
     const jobId = req.params.id;
     const success = queueManager.startJob(jobId);
 
@@ -73,7 +74,7 @@ function registerQueueRoutes(app, queueManager) {
   });
 
   // DELETE /api/queue/:id - Remove job from queue
-  app.delete('/api/queue/:id', (req, res) => {
+  app.delete('/api/queue/:id', jobIdValidation, (req, res) => {
     const jobId = req.params.id;
     const deleteFiles = req.query.deleteFiles === 'true';
     const success = queueManager.removeJob(jobId, deleteFiles);
@@ -86,7 +87,7 @@ function registerQueueRoutes(app, queueManager) {
   });
 
   // POST /api/queue/:id/move - Move job to new position
-  app.post('/api/queue/:id/move', queueMoveValidation, (req, res) => {
+  app.post('/api/queue/:id/move', [...jobIdValidation, ...queueMoveValidation], (req, res) => {
     const jobId = req.params.id;
     const { position } = req.body || {};
   

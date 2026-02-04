@@ -525,6 +525,19 @@ class o {
 let n = new t();
 const r = new e(),
     i = new o();
+
+// Inject media detector script into page context for all pages
+(function injectMediaDetector() {
+    try {
+        const script = document.createElement("script");
+        script.src = chrome.runtime.getURL("js/media-detector.js");
+        (document.head || document.documentElement).appendChild(script);
+        console.log('[FetchV Injection] Media detector script injected');
+    } catch (err) {
+        console.error('[FetchV Injection] Failed to inject media detector:', err);
+    }
+})();
+
 chrome.runtime.onMessage.addListener(function (e, o, s) {
     const { cmd: a, parameter: d } = e;
     if ("REC_START" === a) {
@@ -600,5 +613,38 @@ chrome.runtime.onMessage.addListener(function (e, o, s) {
             }
         }
         return t && s(t), !0;
+    }
+});
+
+// Listen for media detection from media-detector.js page script
+window.addEventListener('message', (event) => {
+    // Validate source
+    if (event.source !== window) return;
+    if (!event.data || event.data.source !== 'fetchv-page-detector') return;
+
+    if (event.data.cmd === 'MEDIA_DETECTED') {
+        const mediaInfo = event.data.data;
+
+        // Validate media info
+        if (!mediaInfo || !mediaInfo.url) {
+            console.warn('[FetchV Injection] Invalid media detection event:', mediaInfo);
+            return;
+        }
+
+        console.log('[FetchV Injection] Media detected:', mediaInfo.url);
+
+        // Send to service worker for storage
+        chrome.runtime.sendMessage({
+            cmd: 'STORE_DETECTED_MEDIA',
+            media: mediaInfo
+        }, (response) => {
+            if (chrome.runtime.lastError) {
+                console.warn('[FetchV Injection] Failed to send media:', chrome.runtime.lastError.message);
+            } else if (response && response.success) {
+                console.log('[FetchV Injection] Media stored successfully:', mediaInfo.url);
+            } else {
+                console.warn('[FetchV Injection] Failed to store media:', response);
+            }
+        });
     }
 });

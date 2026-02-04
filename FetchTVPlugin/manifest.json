@@ -41,12 +41,12 @@
    "manifest_version": 3,
    "minimum_chrome_version": "92",
    "name": "__MSG_manifest_name__",
-   "permissions": [ "tabs", "webRequest", "storage", "declarativeNetRequest", "offscreen", "scripting" ],
-   "short_name": "FetchV",
+   "permissions": [ "tabs", "storage", "scripting", "offscreen" ],
+   "short_name": "M3U8 Downloader",
    "update_url": "https://clients2.google.com/service/update2/crx",
    "version": "3.2",
    "web_accessible_resources": [ {
       "matches": [ "\u003Call_urls>" ],
-      "resources": [ "js/hook.js", "js/mediabunny.js", "img/recording.svg" ]
+      "resources": [ "js/hook.js", "js/media-detector.js", "js/mediabunny.js", "img/recording.svg" ]
    } ]
 }

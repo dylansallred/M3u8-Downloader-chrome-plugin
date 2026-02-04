@@ -1,12 +1,12 @@
 {
    "manifest_browser_action": {
-      "message": "FetchV"
+      "message": "M3U8 Downloader"
    },
    "manifest_description": {
       "message": "The video downloader for saving web videos and live streams."
    },
    "manifest_name": {
-      "message": "FetchV - Video Downloader for m3u8 & hls"
+      "message": "M3U8 Downloader - Video Downloader for m3u8 & hls"
    },
    "modal_record": {
       "message": "Record"

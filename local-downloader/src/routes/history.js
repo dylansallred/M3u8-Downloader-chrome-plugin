@@ -37,14 +37,21 @@ async function registerHistoryRoutes(app, fsPromises, downloadDir) {
 
         // Derive job id prefix from file name to check for matching thumbnail
         const jobIdPrefix = fileName.split('-')[0];
-        const thumbName = `${jobIdPrefix}-thumb.jpg`;
-        const thumbPath = path.join(downloadDir, thumbName);
+
+        // Validate jobIdPrefix to prevent path traversal
+        // Only allow alphanumeric characters, max 20 chars
+        const isValidJobId = /^[a-z0-9]+$/i.test(jobIdPrefix) && jobIdPrefix.length <= 20;
+
         let hasThumb = false;
-        try {
-          await fsPromises.access(thumbPath);
-          hasThumb = true;
-        } catch {
-          hasThumb = false;
+        if (isValidJobId) {
+          const thumbName = `${jobIdPrefix}-thumb.jpg`;
+          const thumbPath = path.join(downloadDir, thumbName);
+          try {
+            await fsPromises.access(thumbPath);
+            hasThumb = true;
+          } catch {
+            hasThumb = false;
+          }
         }
 
         files.push({

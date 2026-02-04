@@ -6,6 +6,7 @@ const https = require('https');
 const { URL } = require('url');
 const { execSync } = require('child_process');
 const WebSocket = require('ws');
+const rateLimit = require('express-rate-limit');
 
 // Route modules
 const registerPageRoutes = require('./src/routes/pages');
@@ -72,6 +73,30 @@ const CLEANUP_INTERVAL_MS = config.cleanupIntervalMs;
 
 app.use(express.static(publicDir));
 app.use(express.json({ limit: '1mb' }));
+
+// Rate limiting middleware
+const apiLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 100, // 100 requests per minute per IP
+  message: 'Too many requests from this IP, please try again later',
+  standardHeaders: true, // Return rate limit info in `RateLimit-*` headers
+  legacyHeaders: false, // Disable `X-RateLimit-*` headers
+});
+
+const jobCreationLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 10, // 10 job creations per minute
+  message: 'Too many download jobs created, please slow down',
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// Apply general rate limiter to all API routes
+app.use('/api/', apiLimiter);
+
+// Apply stricter rate limiter to job creation endpoints
+app.use('/api/jobs', jobCreationLimiter);
+app.use('/api/queue/add', jobCreationLimiter);
 
 if (!FFMPEG_PATH) {
   logger.warn(`

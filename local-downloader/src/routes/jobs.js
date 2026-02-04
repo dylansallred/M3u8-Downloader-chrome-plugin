@@ -2,12 +2,16 @@ const fs = require('fs');
 const path = require('path');
 const { URL } = require('url');
 const logger = require('../utils/logger');
-const { jobValidation } = require('../utils/validators');
+const { jobValidation, jobIdValidation } = require('../utils/validators');
 const { lookupPoster } = require('../services/tmdb');
 const { fetchAndSaveSubtitles } = require('../services/subdl');
 const config = require('../config');
 
-const SUBDL_API_KEY = process.env.SUBDL_API_KEY || 'rsjvucfBa45xnvbd3XTB8bP3LqHTs0D6';
+const SUBDL_API_KEY = process.env.SUBDL_API_KEY;
+
+if (!SUBDL_API_KEY) {
+  logger.warn('SUBDL_API_KEY environment variable not set - subtitle download will be disabled');
+}
 
 // Remove season/episode tokens for external lookups (TMDB/SubDL) while keeping display name intact.
 const deriveLookupTitle = (raw) => {
@@ -18,6 +22,13 @@ const deriveLookupTitle = (raw) => {
 
 async function fetchSubtitlesForJob(job, downloadDir, queueManager, opts = {}) {
   if (!job) return;
+
+  // Skip subtitle fetch if API key is not configured
+  if (!SUBDL_API_KEY) {
+    logger.debug('Skipping subtitle fetch - SUBDL_API_KEY not configured', { jobId: job.id });
+    return;
+  }
+
   try {
     const { seasonNumber, episodeNumber, type, lookupTitle } = opts;
     const result = await fetchAndSaveSubtitles({
@@ -300,7 +311,7 @@ function registerJobRoutes(
   });
 
   // Get current job status/progress
-  app.get('/api/jobs/:id', (req, res) => {
+  app.get('/api/jobs/:id', jobIdValidation, (req, res) => {
     const job = jobs.get(req.params.id);
     if (!job) {
       logger.warn('Job status requested for missing job', { jobId: req.params.id });
@@ -376,7 +387,7 @@ function registerJobRoutes(
   });
 
   // Cancel a running job
-  app.post('/api/jobs/:id/cancel', (req, res) => {
+  app.post('/api/jobs/:id/cancel', jobIdValidation, (req, res) => {
     const job = jobs.get(req.params.id);
     if (!job) {
       logger.warn('Cancel requested for missing job', { jobId: req.params.id });
@@ -394,7 +405,7 @@ function registerJobRoutes(
   });
 
   // Download the completed file (attachment)
-  app.get('/api/jobs/:id/file', (req, res) => {
+  app.get('/api/jobs/:id/file', jobIdValidation, (req, res) => {
     const job = jobs.get(req.params.id);
     if (!job) {
       logger.warn('File download requested for missing job', { jobId: req.params.id });
@@ -421,7 +432,7 @@ function registerJobRoutes(
   });
 
   // Stream the completed file for inline playback (e.g., video preview)
-  app.get('/api/jobs/:id/stream', (req, res) => {
+  app.get('/api/jobs/:id/stream', jobIdValidation, (req, res) => {
     const job = jobs.get(req.params.id);
     if (!job) {
       logger.warn('Stream requested for missing job', { jobId: req.params.id });

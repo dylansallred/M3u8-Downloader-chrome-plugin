@@ -158,6 +158,39 @@
         }
     });
 
+    // Listen for media detection from injected script (media-detector.js)
+    window.addEventListener('message', (event) => {
+        // Validate source
+        if (event.source !== window) return;
+        if (!event.data || event.data.source !== 'fetchv-page-detector') return;
+
+        if (event.data.cmd === 'MEDIA_DETECTED') {
+            const mediaInfo = event.data.data;
+
+            // Validate media info
+            if (!mediaInfo || !mediaInfo.url) {
+                console.warn('[FetchV Content] Invalid media detection event:', mediaInfo);
+                return;
+            }
+
+            console.log('[FetchV Content] Media detected:', mediaInfo.url);
+
+            // Send to service worker for storage
+            safeSendMessage({
+                cmd: 'STORE_DETECTED_MEDIA',
+                media: mediaInfo
+            }).then((response) => {
+                if (response && response.success) {
+                    console.log('[FetchV Content] Media stored successfully:', mediaInfo.url);
+                } else {
+                    console.warn('[FetchV Content] Failed to store media:', response);
+                }
+            }).catch((error) => {
+                console.error('[FetchV Content] Error storing media:', error);
+            });
+        }
+    });
+
     // Respond to page title/info requests from the popup
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const { cmd } = message || {};

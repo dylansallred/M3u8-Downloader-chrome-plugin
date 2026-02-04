@@ -1,0 +1,8 @@
+node_modules/
+local-downloader/logs/
+local-downloader/downloads/
+local-downloader/node_modules/
+.claude
+.conductor
+.context
+
