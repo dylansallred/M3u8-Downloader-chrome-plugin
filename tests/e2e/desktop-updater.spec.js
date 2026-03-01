@@ -191,7 +191,7 @@ test('updates view reflects updater state transitions and enables install when d
 
     // Button is now named "Check" (not "Check for Updates")
     await page.getByRole('button', { name: 'Check' }).click();
-    await expect(page.getByText('checking')).toBeVisible();
+    await expect(page.getByText('checking', { exact: true })).toBeVisible();
     await expect(page.getByText('Checking for updates...')).toBeVisible();
 
     await page.evaluate(() => {
@@ -201,7 +201,7 @@ test('updates view reflects updater state transitions and enables install when d
         progress: 0,
       });
     });
-    await expect(page.getByText('available')).toBeVisible();
+    await expect(page.getByText('available', { exact: true })).toBeVisible();
     await expect(page.getByText('Update available')).toBeVisible();
 
     await page.evaluate(() => {
@@ -211,7 +211,7 @@ test('updates view reflects updater state transitions and enables install when d
         progress: 42,
       });
     });
-    await expect(page.getByText('downloading')).toBeVisible();
+    await expect(page.getByText('downloading', { exact: true })).toBeVisible();
 
     await page.evaluate(() => {
       window.__desktopTestHarness.emitUpdater({
@@ -221,7 +221,7 @@ test('updates view reflects updater state transitions and enables install when d
         releaseNotes: ['Fix queue stability', 'Improve updater reminders'],
       });
     });
-    await expect(page.getByText('downloaded')).toBeVisible();
+    await expect(page.getByText('downloaded', { exact: true })).toBeVisible();
     // Install and Later buttons are now enabled when phase is 'downloaded'
     await expect(page.getByRole('button', { name: 'Install' })).toBeEnabled();
     await expect(page.getByRole('button', { name: 'Later' })).toBeEnabled();
@@ -902,7 +902,7 @@ test('updates view shows updater error and keeps install disabled', async ({ pag
     });
 
     // Phase is shown as a Badge text value
-    await expect(page.getByText('error')).toBeVisible();
+    await expect(page.getByText('error', { exact: true })).toBeVisible();
     await expect(page.getByText('Update check failed')).toBeVisible();
     // Error text is rendered as a plain <p>, not prefixed with "Error:"
     await expect(page.getByText('GitHub API rate limit exceeded')).toBeVisible();
