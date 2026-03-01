@@ -463,8 +463,8 @@ test('cancel endpoint stops an active job', async () => {
       return false;
     }, { timeoutMs: 7000, intervalMs: 150 });
   } finally {
-    await mediaServer.close();
     await apiServer.stop();
+    await mediaServer.close();
   }
 });
 
@@ -506,6 +506,13 @@ test('hls job falls back to direct media URL when all segments fail', async () =
     const contentType = fileRes.headers.get('content-type') || '';
     assert.match(contentType, /^video\/(mp4|mp2t)/i);
 
+    const disableAutoStartRes = await apiFetch(baseUrl, '/api/queue/settings', {
+      method: 'POST',
+      includeV1Headers: false,
+      body: { autoStart: false },
+    });
+    assert.equal(disableAutoStartRes.status, 200);
+
     const retryRes = await apiFetch(baseUrl, `/api/jobs/${jobId}/retry-original-hls`, {
       method: 'POST',
       includeV1Headers: false,
@@ -522,7 +529,7 @@ test('hls job falls back to direct media URL when all segments fail', async () =
     assert.equal(retryGenericRes.data.retryOf, jobId);
     assert.ok(retryGenericRes.data.id);
   } finally {
-    await mediaServer.close();
     await apiServer.stop();
+    await mediaServer.close();
   }
 });
