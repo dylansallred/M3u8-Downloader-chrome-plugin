@@ -1,0 +1,60 @@
+{
+  "name": "@m3u8/desktop",
+  "version": "1.0.0",
+  "private": true,
+  "main": "electron/main.js",
+  "description": "M3U8 Downloader Desktop",
+  "scripts": {
+    "dev": "concurrently -k \"npm:dev:renderer\" \"npm:dev:electron\"",
+    "dev:renderer": "vite",
+    "dev:electron": "wait-on tcp:5173 && cross-env VITE_DEV_SERVER_URL=http://localhost:5173 electron .",
+    "build": "vite build",
+    "pack": "npm run build && electron-builder --dir",
+    "dist": "npm run build && electron-builder"
+  },
+  "dependencies": {
+    "@m3u8/contracts": "1.0.0",
+    "@m3u8/downloader-api": "1.0.0",
+    "electron-updater": "^6.3.9",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^5.0.0",
+    "concurrently": "^9.2.0",
+    "cross-env": "^7.0.3",
+    "electron": "^40.6.1",
+    "electron-builder": "^26.8.1",
+    "vite": "^7.3.1",
+    "wait-on": "^8.0.1"
+  },
+  "build": {
+    "appId": "com.dylanallred.m3u8downloader",
+    "productName": "M3U8 Downloader",
+    "directories": {
+      "output": "dist-electron"
+    },
+    "files": [
+      "electron/**/*",
+      "dist/**/*",
+      "package.json"
+    ],
+    "publish": [
+      {
+        "provider": "github"
+      }
+    ],
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "hardenedRuntime": true
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    }
+  }
+}

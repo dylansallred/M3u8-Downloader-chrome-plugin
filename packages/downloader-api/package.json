@@ -1,0 +1,16 @@
+{
+  "name": "@m3u8/downloader-api",
+  "version": "1.0.0",
+  "private": true,
+  "main": "src/index.js",
+  "dependencies": {
+    "@m3u8/contracts": "1.0.0",
+    "@m3u8/downloader-engine": "1.0.0",
+    "express": "^5.2.1",
+    "express-rate-limit": "^8.2.1",
+    "express-validator": "^7.0.1",
+    "ws": "^8.17.0",
+    "winston": "^3.10.0",
+    "unzipper": "^0.12.3"
+  }
+}

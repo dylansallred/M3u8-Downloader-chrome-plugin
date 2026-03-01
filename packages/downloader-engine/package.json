@@ -1,0 +1,10 @@
+{
+  "name": "@m3u8/downloader-engine",
+  "version": "1.0.0",
+  "private": true,
+  "main": "src/index.js",
+  "dependencies": {
+    "unzipper": "^0.12.3",
+    "winston": "^3.10.0"
+  }
+}

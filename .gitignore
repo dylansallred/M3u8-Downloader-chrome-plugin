@@ -1,8 +1,12 @@
 node_modules/
-local-downloader/logs/
-local-downloader/downloads/
-local-downloader/node_modules/
+apps/desktop/dist/
+apps/desktop/dist-electron/
+packages/downloader-api/logs/
+packages/downloader-engine/logs/
+.vite/
+*.log
+playwright-report/
+test-results/
 .claude
 .conductor
 .context
-

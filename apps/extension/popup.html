@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>M3U8 Desktop Bridge</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header>
+      <h1>M3U8 Desktop Bridge</h1>
+      <p id="connectionStatus">Checking desktop app...</p>
+    </header>
+
+    <section class="card" id="pairingCard">
+      <h2>Pair Extension</h2>
+      <p>Generate a pairing code in the desktop app settings, then enter it here.</p>
+      <div class="row">
+        <input id="pairingCode" maxlength="12" placeholder="PAIRING CODE" />
+        <button id="pairButton">Pair</button>
+      </div>
+      <p id="pairingResult" class="muted"></p>
+    </section>
+
+    <section class="card">
+      <div class="row between">
+        <h2>Detected Media</h2>
+        <button id="refreshButton">Refresh</button>
+      </div>
+      <div id="mediaList" class="media-list"></div>
+      <p id="emptyState" class="muted">No media detected on this tab yet.</p>
+    </section>
+
+    <footer>
+      <button id="clearButton">Clear Tab Media</button>
+      <p class="muted">API: <span id="apiTarget">http://127.0.0.1:49732</span></p>
+    </footer>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

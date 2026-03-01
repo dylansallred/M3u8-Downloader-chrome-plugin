@@ -1,0 +1,6 @@
+{
+  "name": "@m3u8/extension",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Chrome extension bridge for M3U8 Downloader desktop app"
+}
