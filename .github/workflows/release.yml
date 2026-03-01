@@ -63,6 +63,7 @@ jobs:
             echo "No DMG artifact found for notarization validation."
             exit 1
           fi
+          xcrun stapler staple "${DMG_FILE}"
           xcrun stapler validate "${DMG_FILE}"
 
   windows-desktop:
