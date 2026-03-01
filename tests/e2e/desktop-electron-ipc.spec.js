@@ -87,7 +87,7 @@ async function startDesktopRendererServer() {
 
 test('electron preload exposes real updater IPC bridge and updates view loads', async () => {
   test.skip(
-    process.platform === 'win32' || (process.platform === 'linux' && process.env.CI === '1'),
+    process.platform === 'win32' || (process.platform === 'linux' && !!process.env.CI),
     'Electron launch automation is validated locally; hosted CI runners can fail to launch Electron reliably.',
   );
 
