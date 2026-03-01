@@ -394,6 +394,18 @@ test('v1 health, pairing, auth, validation, queue lifecycle, and restart recover
     assert.ok(recoveryJobBefore);
     assert.equal(recoveryJobBefore.queueStatus, 'queued');
 
+    const queueFilePath = path.join(tmpRoot, 'downloads', 'queue.json');
+    await waitFor(() => {
+      try {
+        const raw = fs.readFileSync(queueFilePath, 'utf8');
+        const parsed = JSON.parse(raw);
+        const persistedQueue = Array.isArray(parsed.queue) ? parsed.queue : [];
+        return persistedQueue.some((job) => job && job.id === recoveryJobRes.data.jobId);
+      } catch {
+        return false;
+      }
+    }, { timeoutMs: 3000, intervalMs: 100 });
+
     await apiServer.stop();
 
     const restarted = await startApi({ dataDir: tmpRoot, port });
