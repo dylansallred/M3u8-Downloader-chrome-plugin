@@ -85,7 +85,7 @@ export function PairingCard({
             <>
               <div className="flex gap-2 mb-3">
                 <Select value={tokenFilter} onValueChange={onFilterChange}>
-                  <SelectTrigger className="w-28 h-7 text-xs bg-background border-border">
+                  <SelectTrigger aria-label="Filter" className="w-28 h-7 text-xs bg-background border-border">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>

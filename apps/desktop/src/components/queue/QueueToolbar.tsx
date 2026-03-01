@@ -25,13 +25,14 @@ export function QueueToolbar({
   return (
     <div className="flex items-center gap-2 flex-wrap">
       <Input
+        aria-label="Search"
         placeholder="Search title or job ID..."
         value={filterText}
         onChange={(e) => onFilterTextChange(e.target.value)}
         className="w-56 h-8 text-sm bg-background border-border"
       />
       <Select value={filterStatus} onValueChange={onFilterStatusChange}>
-        <SelectTrigger className="w-36 h-8 text-sm bg-background border-border">
+        <SelectTrigger aria-label="Status" className="w-36 h-8 text-sm bg-background border-border">
           <SelectValue placeholder="All statuses" />
         </SelectTrigger>
         <SelectContent>

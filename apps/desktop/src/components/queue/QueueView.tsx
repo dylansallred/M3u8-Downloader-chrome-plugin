@@ -16,6 +16,7 @@ export function QueueView({ apiBase }: QueueViewProps) {
 
   return (
     <div className="animate-fade-slide-in space-y-3">
+      <h1 className="sr-only">Queue</h1>
       <ActiveDownloadCard
         job={activeJob}
         metrics={activeMetrics}

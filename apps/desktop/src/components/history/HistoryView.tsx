@@ -11,6 +11,7 @@ export function HistoryView({ apiBase }: HistoryViewProps) {
 
   return (
     <div className="animate-fade-slide-in space-y-5">
+      <h1 className="sr-only">History</h1>
       <HistoryToolbar
         filterText={history.filterText}
         filterType={history.filterType}

@@ -371,7 +371,7 @@ function renderMedia(items) {
 
   for (const item of items) {
     const wrapper = document.createElement('div');
-    wrapper.className = 'glass-subtle glass-glow p-3 animate-slide-up';
+    wrapper.className = 'media-item glass-subtle glass-glow p-3 animate-slide-up';
 
     // Row 1: title + pills
     const titleRow = document.createElement('div');

@@ -44,6 +44,7 @@ export function SettingsView({
 
   return (
     <div className="animate-fade-slide-in space-y-5">
+      <h1 className="sr-only">Settings</h1>
       <DesktopSettingsCard settings={settings} onSave={onSaveSettings} />
       <UpdaterCard updater={updater} />
       <PairingCard

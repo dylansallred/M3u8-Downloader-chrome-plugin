@@ -54,6 +54,7 @@ export function Navbar({ currentView, onViewChange, status, compatibilityWarning
         )}
         {compatibilityWarning && (
           <button
+            aria-label="Compatibility Warning"
             onClick={() => onViewChange('settings')}
             title={compatibilityWarning}
             className="text-status-paused hover:text-status-paused/80 transition-colors"
