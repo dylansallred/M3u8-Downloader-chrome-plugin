@@ -89,10 +89,16 @@ jobs:
           WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
           WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
 
-      - name: Verify code signatures
-        if: ${{ secrets.WIN_CSC_LINK != '' && secrets.WIN_CSC_KEY_PASSWORD != '' }}
+      - name: Verify code signatures (when signing is configured)
         shell: pwsh
+        env:
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
         run: |
+          if ([string]::IsNullOrWhiteSpace($env:WIN_CSC_LINK) -or [string]::IsNullOrWhiteSpace($env:WIN_CSC_KEY_PASSWORD)) {
+            Write-Host "Skipping signature verification because Windows signing secrets are not configured."
+            exit 0
+          }
           $signtool = Get-Command signtool.exe -ErrorAction SilentlyContinue
           if (-not $signtool) {
             Write-Host "signtool.exe not found in PATH"
