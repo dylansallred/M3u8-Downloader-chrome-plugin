@@ -18,9 +18,9 @@ const registerHistoryRoutes = require('./routes/history');
 const registerQueueRoutes = require('./routes/queue');
 const registerJobRoutes = require('./routes/jobs');
 const logger = require('./utils/logger');
+const { inferMediaMetadata } = require('./utils/mediaMetadata');
 const { lookupPoster } = require('./services/tmdb');
 const appConfig = require('./config');
-const AuthManager = require('./auth/AuthManager');
 
 function detectFFmpegPath(explicitPath) {
   const possiblePaths = [
@@ -67,8 +67,6 @@ function createApiServer(options = {}) {
 
   const resolvedDownloadDir = downloadDir || path.join(dataDir, 'downloads');
   fs.mkdirSync(resolvedDownloadDir, { recursive: true });
-
-  const authManager = new AuthManager({ dataDir });
 
   const FFMPEG_PATH = detectFFmpegPath(ffmpegPath);
   const FFPROBE_PATH = ffprobePath || process.env.FFPROBE_PATH
@@ -239,6 +237,7 @@ function createApiServer(options = {}) {
       tmdbTitle: job.tmdbTitle || null,
       tmdbReleaseDate: job.tmdbReleaseDate || null,
       tmdbMetadata: job.tmdbMetadata || null,
+      mediaHints: job.mediaHints || null,
     };
   }
 
@@ -273,6 +272,36 @@ function createApiServer(options = {}) {
       && isValidHttpUrl(requestedFallbackUrl)
         ? requestedFallbackUrl
         : '';
+    const inferredHints = inferMediaMetadata({
+      title: queue.title,
+      resourceName: queue.name,
+      sourcePageTitle: queue.title,
+      mediaUrl: queue.url,
+      sourcePageUrl: queue.sourcePageUrl,
+    });
+    const mediaHints = {
+      ...inferredHints,
+      ...(queue.titleHints && typeof queue.titleHints === 'object' ? queue.titleHints : {}),
+      lookupTitle: (
+        (queue.titleHints && queue.titleHints.lookupTitle)
+        || inferredHints.lookupTitle
+        || ''
+      ).trim(),
+      seasonNumber: Number.isFinite(queue.titleHints && queue.titleHints.seasonNumber)
+        ? queue.titleHints.seasonNumber
+        : inferredHints.seasonNumber,
+      episodeNumber: Number.isFinite(queue.titleHints && queue.titleHints.episodeNumber)
+        ? queue.titleHints.episodeNumber
+        : inferredHints.episodeNumber,
+      isTvCandidate: Boolean(
+        (queue.titleHints && queue.titleHints.isTvCandidate)
+        || inferredHints.isTvCandidate
+        || (
+          Number.isFinite(queue.titleHints && queue.titleHints.seasonNumber)
+          && Number.isFinite(queue.titleHints && queue.titleHints.episodeNumber)
+        )
+      ),
+    };
 
     let filePath;
     let tsName;
@@ -342,6 +371,7 @@ function createApiServer(options = {}) {
       title: baseName || queue.title || queue.name || 'Download',
       url: queue.url,
       headers: queue.headers || {},
+      sourcePageUrl: queue.sourcePageUrl || '',
       totalSegments: 0,
       completedSegments: 0,
       bytesDownloaded: 0,
@@ -354,6 +384,7 @@ function createApiServer(options = {}) {
       thumbnailPaths: null,
       thumbnailUrls: [],
       skipThumbnailGeneration: false,
+      mediaHints,
       downloadNameMp4,
       fallbackUrl: fallbackMediaUrl || null,
       originalHlsUrl: isHls ? queue.url : null,
@@ -391,17 +422,53 @@ function createApiServer(options = {}) {
     if (!appConfig.tmdbApiKey) return;
 
     try {
+      const hints = job.mediaHints || inferMediaMetadata({
+        title: job.title,
+        resourceName: job.downloadName,
+        mediaUrl: job.url,
+        sourcePageUrl: job.sourcePageUrl,
+      });
+      const lookupTitle = hints.lookupTitle || job.title || job.downloadName;
+      const type = hints.isTvCandidate ? 'tv' : 'movie';
+      logger.info('TMDB lookup start', {
+        jobId: job.id,
+        title: lookupTitle,
+        type,
+        seasonNumber: hints.seasonNumber,
+        episodeNumber: hints.episodeNumber,
+        matchedPattern: hints.matchedPattern,
+        matchedField: hints.matchedField,
+      });
       const result = await lookupPoster({
         apiKey: appConfig.tmdbApiKey,
-        title: job.title || job.downloadName,
+        title: lookupTitle,
+        type,
       });
 
       if (result) {
-        job.thumbnailUrls = [result.posterUrl, result.backdropUrl].filter(Boolean);
+        job.thumbnailUrls = Array.isArray(result.imageUrls)
+          ? result.imageUrls.filter(Boolean)
+          : [result.posterUrl, result.backdropUrl].filter(Boolean);
         job.tmdbId = result.id;
         job.tmdbTitle = result.title;
         job.tmdbReleaseDate = result.releaseDate;
+        job.tmdbMetadata = {
+          overview: result.overview,
+          runtime: result.runtime,
+          tagline: result.tagline,
+          genres: result.genres,
+          mediaType: result.mediaType || type,
+        };
+        job.skipThumbnailGeneration = true;
         queueManager.saveQueue();
+        logger.info('TMDB lookup success', {
+          jobId: job.id,
+          tmdbId: result.id,
+          mediaType: result.mediaType || type,
+          thumbnails: job.thumbnailUrls.length,
+        });
+      } else {
+        logger.info('TMDB lookup returned no results', { jobId: job.id, title: lookupTitle, type });
       }
     } catch (err) {
       logger.warn('TMDB lookup failed', { jobId: job.id, error: err.message });
@@ -426,13 +493,6 @@ function createApiServer(options = {}) {
       }
     }
     return null;
-  }
-
-  function parseBearerToken(req) {
-    const authHeader = req.headers.authorization || req.headers.Authorization;
-    if (!authHeader || typeof authHeader !== 'string') return null;
-    const match = authHeader.match(/^Bearer\s+(.+)$/i);
-    return match ? match[1] : null;
   }
 
   function parseVersionParts(input) {
@@ -556,30 +616,33 @@ function createApiServer(options = {}) {
     return output;
   }
 
-  function validatePairRequest(body) {
-    const payload = body && typeof body === 'object' ? body : {};
-    const pairingCode = sanitizeString(payload.pairingCode, 32).toUpperCase();
-    const extensionId = sanitizeString(payload.extensionId, 128);
-    const extensionVersion = sanitizeString(payload.extensionVersion, 64);
-    const browser = sanitizeString(payload.browser, 32) || 'chrome';
-
-    if (!pairingCode) {
-      const err = new Error('pairingCode is required');
-      err.statusCode = 400;
-      throw err;
+  function sanitizeTitleHints(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return null;
     }
 
-    if (!extensionId) {
-      const err = new Error('extensionId is required');
-      err.statusCode = 400;
-      throw err;
+    const lookupTitle = sanitizeString(value.lookupTitle, 255);
+    const seasonNumberRaw = Number(value.seasonNumber);
+    const episodeNumberRaw = Number(value.episodeNumber);
+    const seasonNumber = Number.isFinite(seasonNumberRaw) && seasonNumberRaw > 0
+      ? Math.min(60, Math.floor(seasonNumberRaw))
+      : null;
+    const episodeNumber = Number.isFinite(episodeNumberRaw) && episodeNumberRaw > 0
+      ? Math.min(999, Math.floor(episodeNumberRaw))
+      : null;
+    const isTvCandidate = Boolean(value.isTvCandidate || (seasonNumber && episodeNumber));
+
+    if (!lookupTitle && !seasonNumber && !episodeNumber && !isTvCandidate) {
+      return null;
     }
 
     return {
-      pairingCode,
-      extensionId,
-      extensionVersion,
-      browser,
+      lookupTitle,
+      seasonNumber,
+      episodeNumber,
+      isTvCandidate,
+      matchedPattern: sanitizeString(value.matchedPattern, 64),
+      matchedField: sanitizeString(value.matchedField, 64),
     };
   }
 
@@ -588,6 +651,7 @@ function createApiServer(options = {}) {
     const mediaUrl = sanitizeString(payload.mediaUrl, 4096);
     const mediaType = sanitizeString(payload.mediaType, 16).toLowerCase();
     const fallbackMediaUrl = sanitizeString(payload.fallbackMediaUrl, 4096);
+    const titleHints = sanitizeTitleHints(payload.titleHints);
 
     if (!isValidHttpUrl(mediaUrl)) {
       const err = new Error('mediaUrl must be a valid http/https URL');
@@ -636,6 +700,7 @@ function createApiServer(options = {}) {
       sourcePageUrl: sanitizeString(payload.sourcePageUrl, 4096),
       sourcePageTitle: sanitizeString(payload.sourcePageTitle, 255),
       fallbackMediaUrl,
+      titleHints,
       headers: sanitizeHeaders(payload.headers),
       settings: {
         fileNaming,
@@ -648,23 +713,6 @@ function createApiServer(options = {}) {
 
   app.use('/v1', validateV1ClientHeaders);
 
-  function requireAuth(req, res, next) {
-    const token = parseBearerToken(req);
-    if (!token) {
-      res.status(401).json({ error: 'Missing bearer token' });
-      return;
-    }
-
-    const tokenRecord = authManager.verifyToken(token);
-    if (!tokenRecord) {
-      res.status(401).json({ error: 'Invalid bearer token' });
-      return;
-    }
-
-    req.authToken = tokenRecord;
-    next();
-  }
-
   app.get('/v1/health', (req, res) => {
     const compatibility = getCompatibilityInfo();
     res.json({
@@ -674,33 +722,19 @@ function createApiServer(options = {}) {
       protocolVersion: String(compatibility.protocolVersion),
       supportedProtocolVersions: compatibility.supportedProtocolVersions,
       minExtensionVersion: compatibility.minExtensionVersion,
-      pairingRequired: authManager.isPairingRequired(),
+      pairingRequired: false,
       wsPath: '/ws',
     });
   });
 
   app.post('/v1/pair/complete', (req, res) => {
-    try {
-      const payload = validatePairRequest(req.body || {});
-      const compatibility = getCompatibilityInfo();
-      if (
-        payload.extensionVersion
-        && compareVersions(payload.extensionVersion, compatibility.minExtensionVersion) < 0
-      ) {
-        res.status(426).json({
-          error: `Extension update required (min ${compatibility.minExtensionVersion})`,
-          compatibility,
-        });
-        return;
-      }
-      const response = authManager.completePairing(payload);
-      res.json(response);
-    } catch (err) {
-      res.status(err.statusCode || 400).json({ error: err.message || 'Pairing failed' });
-    }
+    // Pairing is deprecated; extension bridge works locally without auth.
+    res.status(410).json({
+      error: 'Pairing is no longer required. Update extension to latest version.',
+    });
   });
 
-  app.post('/v1/jobs', requireAuth, (req, res) => {
+  app.post('/v1/jobs', (req, res) => {
     let body;
     try {
       body = validateCreateJobRequest(req.body || {});
@@ -715,6 +749,7 @@ function createApiServer(options = {}) {
       name: body.resourceName || body.title || 'media',
       headers: body.headers || {},
       sourcePageUrl: body.sourcePageUrl || '',
+      titleHints: body.titleHints || null,
     };
 
     const settings = {
@@ -748,14 +783,14 @@ function createApiServer(options = {}) {
     });
   });
 
-  app.get('/v1/queue', requireAuth, (req, res) => {
+  app.get('/v1/queue', (req, res) => {
     res.json({
       queue: queueManager.getQueue(),
       settings: queueManager.getSettings(),
     });
   });
 
-  app.post('/v1/app/focus', requireAuth, async (req, res) => {
+  app.post('/v1/app/focus', async (req, res) => {
     if (typeof onFocus === 'function') {
       try {
         await Promise.resolve(onFocus());
@@ -1027,11 +1062,10 @@ function createApiServer(options = {}) {
     server,
     start,
     stop,
-    authManager,
     getState: () => ({
       queue: queueManager.getQueue(),
       settings: queueManager.getSettings(),
-      pairingRequired: authManager.isPairingRequired(),
+      pairingRequired: false,
       appVersion,
       apiVersion: API.apiVersion,
     }),

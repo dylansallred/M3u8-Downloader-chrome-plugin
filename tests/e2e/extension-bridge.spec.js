@@ -82,7 +82,7 @@ async function startCompatibilityFixtureServer() {
         protocolVersion: '1',
         supportedProtocolVersions: { min: 1, max: 1 },
         minExtensionVersion: '99.0.0',
-        pairingRequired: true,
+        pairingRequired: false,
         wsPath: '/ws',
       });
       res.writeHead(200, {
@@ -272,14 +272,10 @@ async function getPopupAlerts(popupPage) {
   return popupPage.evaluate(() => window.__e2eAlerts || []);
 }
 
-test('extension popup can pair and send detected media to local API queue', async () => {
+test('extension popup can send detected media to local API queue', async () => {
   test.skip(process.platform === 'win32', 'Extension automation is validated in CI on Linux runner');
 
-  await withFixtureApp(async ({ apiServer, apiBaseUrl, popupPage }) => {
-    const pairing = apiServer.authManager.generatePairingCode();
-
-    await popupPage.fill('#pairingCode', pairing.code);
-    await popupPage.click('#pairButton');
+  await withFixtureApp(async ({ apiBaseUrl, popupPage }) => {
     await expect(popupPage.locator('#connectionStatus')).toContainText('Desktop connected');
 
     await popupPage.click('#refreshButton');
@@ -297,48 +293,6 @@ test('extension popup can pair and send detected media to local API queue', asyn
   });
 });
 
-test('extension prompts re-pair when token is revoked and does not queue new job', async () => {
-  test.skip(process.platform === 'win32', 'Extension automation is validated in CI on Linux runner');
-
-  await withFixtureApp(async ({ apiServer, apiBaseUrl, popupPage }) => {
-    const pairing = apiServer.authManager.generatePairingCode();
-
-    await popupPage.fill('#pairingCode', pairing.code);
-    await popupPage.click('#pairButton');
-    await expect(popupPage.locator('#connectionStatus')).toContainText('Desktop connected');
-
-    await popupPage.click('#refreshButton');
-    await expect(popupPage.locator('.media-item').first()).toBeVisible();
-
-    // Prime queue with one successful job.
-    await popupPage.click('button:has-text("Send to Desktop")');
-    await waitForJobQueued(apiBaseUrl, 10_000);
-
-    const queueBeforeRes = await fetch(`${apiBaseUrl}/api/queue`);
-    const queueBefore = await queueBeforeRes.json();
-    const beforeCount = Array.isArray(queueBefore.queue) ? queueBefore.queue.length : 0;
-
-    // Force token expiration/invalid state.
-    apiServer.authManager.revokeAll();
-
-    await popupPage.click('button:has-text("Send to Desktop")');
-    await popupPage.waitForTimeout(700);
-
-    const alerts = await getPopupAlerts(popupPage);
-    expect(alerts.some((a) => a.includes('Token expired or invalid. Pair again.'))).toBeTruthy();
-
-    // Ensure no additional queue item was created with revoked token.
-    const queueAfterRes = await fetch(`${apiBaseUrl}/api/queue`);
-    const queueAfter = await queueAfterRes.json();
-    const afterCount = Array.isArray(queueAfter.queue) ? queueAfter.queue.length : 0;
-    expect(afterCount).toBe(beforeCount);
-
-    // Refresh status should now require pairing again.
-    await popupPage.click('#refreshButton');
-    await expect(popupPage.locator('#pairingResult')).toContainText('requires pairing');
-  });
-});
-
 test('extension shows desktop app unreachable guidance when local API is down', async () => {
   test.skip(process.platform === 'win32', 'Extension automation is validated in CI on Linux runner');
 
@@ -347,45 +301,13 @@ test('extension shows desktop app unreachable guidance when local API is down', 
 
   await withExtensionOnly(unreachableApiBase, async ({ popupPage }) => {
     await expect(popupPage.locator('#connectionStatus')).toContainText('not running');
-    await expect(popupPage.locator('#pairingResult')).toContainText('Open desktop app, then click Refresh.');
-    await expect(popupPage.locator('#pairingCard')).toBeVisible();
 
     await popupPage.click('#refreshButton');
     await expect(popupPage.locator('#connectionStatus')).toContainText('not running');
   });
 });
 
-test('extension shows pairing failure for invalid pairing code', async () => {
-  test.skip(process.platform === 'win32', 'Extension automation is validated in CI on Linux runner');
-
-  await withFixtureApp(async ({ apiServer, popupPage }) => {
-    const pairing = apiServer.authManager.generatePairingCode();
-    const invalidCode = pairing.code === 'BADCODE1' ? 'BADCODE2' : 'BADCODE1';
-
-    await popupPage.fill('#pairingCode', invalidCode);
-    await popupPage.click('#pairButton');
-
-    await expect(popupPage.locator('#pairingResult')).toContainText('Pairing failed: Invalid pairing code.');
-    await expect(popupPage.locator('#pairingCard')).toBeVisible();
-  });
-});
-
-test('extension shows pairing failure for expired pairing code', async () => {
-  test.skip(process.platform === 'win32', 'Extension automation is validated in CI on Linux runner');
-
-  await withFixtureApp(async ({ apiServer, popupPage }) => {
-    const pairing = apiServer.authManager.generatePairingCode(1);
-
-    await popupPage.waitForTimeout(30);
-    await popupPage.fill('#pairingCode', pairing.code);
-    await popupPage.click('#pairButton');
-
-    await expect(popupPage.locator('#pairingResult')).toContainText('No valid pairing code. Generate a new code in desktop settings.');
-    await expect(popupPage.locator('#pairingCard')).toBeVisible();
-  });
-});
-
-test('extension blocks pairing and enqueue when app requires newer extension version', async () => {
+test('extension blocks enqueue when app requires newer extension version', async () => {
   test.skip(process.platform === 'win32', 'Extension automation is validated in CI on Linux runner');
 
   const compatibilityServer = await startCompatibilityFixtureServer();
@@ -393,8 +315,12 @@ test('extension blocks pairing and enqueue when app requires newer extension ver
   try {
     await withExtensionOnly(compatibilityServer.baseUrl, async ({ popupPage }) => {
       await expect(popupPage.locator('#connectionStatus')).toContainText('update required');
-      await expect(popupPage.locator('#pairingResult')).toContainText('too old');
-      await expect(popupPage.locator('#pairButton')).toBeDisabled();
+      await popupPage.click('#refreshButton');
+      await expect(popupPage.locator('.media-item').first()).toBeVisible();
+      await popupPage.click('button:has-text("Send to Desktop")');
+      await popupPage.waitForTimeout(500);
+      const alerts = await getPopupAlerts(popupPage);
+      expect(alerts.some((a) => a.includes('Update required before sending jobs'))).toBeTruthy();
     });
   } finally {
     await compatibilityServer.close();
@@ -411,10 +337,6 @@ test('extension recovers after local desktop API restarts and can enqueue again'
 
   try {
     await withExtensionOnly(apiBaseUrl, async ({ popupPage }) => {
-      const pairing = apiServer.authManager.generatePairingCode();
-
-      await popupPage.fill('#pairingCode', pairing.code);
-      await popupPage.click('#pairButton');
       await expect(popupPage.locator('#connectionStatus')).toContainText('Desktop connected');
 
       await popupPage.click('#refreshButton');

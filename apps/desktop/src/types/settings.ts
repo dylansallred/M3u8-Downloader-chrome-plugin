@@ -3,5 +3,6 @@ export interface DesktopSettings {
   queueAutoStart: boolean;
   checkUpdatesOnStartup: boolean;
   tmdbApiKey?: string;
+  subdlApiKey?: string;
   downloadThreads: number;
 }

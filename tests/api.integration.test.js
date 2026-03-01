@@ -19,6 +19,7 @@ if (process.env.TEST_VERBOSE !== '1') {
 }
 
 const { createApiServer } = require('../packages/downloader-api/src');
+const { inferMediaMetadata } = require('../packages/downloader-api/src/utils/mediaMetadata');
 
 async function getFreePort() {
   return new Promise((resolve, reject) => {
@@ -196,23 +197,45 @@ async function startApi({ dataDir, port }) {
   return server;
 }
 
-async function issueToken(server, baseUrl) {
-  const pairing = server.authManager.generatePairingCode();
-  const pairRes = await apiFetch(baseUrl, '/v1/pair/complete', {
-    method: 'POST',
-    body: {
-      pairingCode: pairing.code,
-      extensionId: 'test-extension-id',
-      extensionVersion: '1.0.0-test',
-      browser: 'chrome',
+test('media metadata inference detects common TV episode patterns', () => {
+  const patterns = [
+    {
+      input: { title: 'The Office S02E05 1080p WEB-DL' },
+      expected: { lookupTitle: 'The Office', seasonNumber: 2, episodeNumber: 5 },
     },
-  });
-  assert.equal(pairRes.status, 200);
-  assert.equal(typeof pairRes.data.token, 'string');
-  return pairRes.data.token;
-}
+    {
+      input: { title: 'Severance 1x09 Finale', resourceName: 'severance.1x09.m3u8' },
+      expected: { lookupTitle: 'Severance Finale', seasonNumber: 1, episodeNumber: 9 },
+    },
+    {
+      input: { title: 'Show Name', resourceName: 'Show.Name.Season.03.Episode.07.mp4' },
+      expected: { lookupTitle: 'Show Name', seasonNumber: 3, episodeNumber: 7 },
+    },
+  ];
 
-test('v1 health, pairing, auth, validation, queue lifecycle, and restart recovery', async () => {
+  for (const sample of patterns) {
+    const hints = inferMediaMetadata(sample.input);
+    assert.equal(hints.isTvCandidate, true);
+    assert.equal(hints.seasonNumber, sample.expected.seasonNumber);
+    assert.equal(hints.episodeNumber, sample.expected.episodeNumber);
+    assert.equal(hints.lookupTitle, sample.expected.lookupTitle);
+  }
+
+  const movieLike = inferMediaMetadata({ title: 'Dune Part Two 2024 2160p' });
+  assert.equal(movieLike.isTvCandidate, false);
+  assert.equal(movieLike.seasonNumber, null);
+  assert.equal(movieLike.episodeNumber, null);
+  assert.equal(movieLike.lookupTitle, 'Dune Part Two 2024');
+
+  const tvRouteHint = inferMediaMetadata({
+    title: 'Scrubs',
+    sourcePageUrl: 'https://www.cineby.gd/tv/295778',
+  });
+  assert.equal(tvRouteHint.isTvCandidate, true);
+  assert.equal(tvRouteHint.lookupTitle, 'Scrubs');
+});
+
+test('v1 health, validation, queue lifecycle, and restart recovery', async () => {
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'm3u8-tests-'));
   const port = await getFreePort();
   const baseUrl = `http://127.0.0.1:${port}`;
@@ -223,7 +246,7 @@ test('v1 health, pairing, auth, validation, queue lifecycle, and restart recover
   try {
     const healthRes = await apiFetch(baseUrl, '/v1/health');
     assert.equal(healthRes.status, 200);
-    assert.equal(healthRes.data.pairingRequired, true);
+    assert.equal(healthRes.data.pairingRequired, false);
     assert.equal(typeof healthRes.data.protocolVersion, 'string');
     assert.ok(healthRes.data.supportedProtocolVersions);
     assert.equal(typeof healthRes.data.minExtensionVersion, 'string');
@@ -233,36 +256,11 @@ test('v1 health, pairing, auth, validation, queue lifecycle, and restart recover
     });
     assert.equal(badProtocolRes.status, 426);
 
-    const badPairRes = await apiFetch(baseUrl, '/v1/pair/complete', {
-      method: 'POST',
-      body: { pairingCode: 'ABC12345' },
-    });
-    assert.equal(badPairRes.status, 400);
-
-    const oldPairing = apiServer.authManager.generatePairingCode();
-    const oldPairRes = await apiFetch(baseUrl, '/v1/pair/complete', {
-      method: 'POST',
-      body: {
-        pairingCode: oldPairing.code,
-        extensionId: 'test-extension-id',
-        extensionVersion: '0.0.1',
-        browser: 'chrome',
-      },
-    });
-    assert.equal(oldPairRes.status, 426);
-
-    const token = await issueToken(apiServer, baseUrl);
-
-    const unauthorizedCreate = await apiFetch(baseUrl, '/v1/jobs', {
-      method: 'POST',
-      body: { mediaUrl: `${mediaServer.baseUrl}/sample.mp4`, mediaType: 'file' },
-      token: null,
-    });
-    assert.equal(unauthorizedCreate.status, 401);
+    const noAuthQueueRes = await apiFetch(baseUrl, '/v1/queue');
+    assert.equal(noAuthQueueRes.status, 200);
 
     const invalidPayloadRes = await apiFetch(baseUrl, '/v1/jobs', {
       method: 'POST',
-      token,
       body: { mediaUrl: 'not-a-url', mediaType: 'file' },
     });
     assert.equal(invalidPayloadRes.status, 400);
@@ -292,7 +290,6 @@ test('v1 health, pairing, auth, validation, queue lifecycle, and restart recover
 
     const createHlsRes = await apiFetch(baseUrl, '/v1/jobs', {
       method: 'POST',
-      token,
       body: {
         mediaUrl: `${mediaServer.baseUrl}/slow.m3u8`,
         mediaType: 'hls',
@@ -328,7 +325,6 @@ test('v1 health, pairing, auth, validation, queue lifecycle, and restart recover
 
     const createDirectRes = await apiFetch(baseUrl, '/v1/jobs', {
       method: 'POST',
-      token,
       body: {
         mediaUrl: `${mediaServer.baseUrl}/sample.mp4`,
         mediaType: 'file',
@@ -341,7 +337,6 @@ test('v1 health, pairing, auth, validation, queue lifecycle, and restart recover
 
     const duplicateDirectRes = await apiFetch(baseUrl, '/v1/jobs', {
       method: 'POST',
-      token,
       body: {
         mediaUrl: `${mediaServer.baseUrl}/sample.mp4`,
         mediaType: 'file',
@@ -378,7 +373,6 @@ test('v1 health, pairing, auth, validation, queue lifecycle, and restart recover
 
     const recoveryJobRes = await apiFetch(baseUrl, '/v1/jobs', {
       method: 'POST',
-      token,
       body: {
         mediaUrl: `${mediaServer.baseUrl}/slow.m3u8`,
         mediaType: 'hls',
@@ -445,11 +439,8 @@ test('cancel endpoint stops an active job', async () => {
   const apiServer = await startApi({ dataDir: tmpRoot, port });
 
   try {
-    const token = await issueToken(apiServer, baseUrl);
-
     const createRes = await apiFetch(baseUrl, '/v1/jobs', {
       method: 'POST',
-      token,
       body: {
         mediaUrl: `${mediaServer.baseUrl}/slow.m3u8`,
         mediaType: 'hls',
@@ -489,11 +480,8 @@ test('hls job falls back to direct media URL when all segments fail', async () =
   const apiServer = await startApi({ dataDir: tmpRoot, port });
 
   try {
-    const token = await issueToken(apiServer, baseUrl);
-
     const createRes = await apiFetch(baseUrl, '/v1/jobs', {
       method: 'POST',
-      token,
       body: {
         mediaUrl: `${mediaServer.baseUrl}/broken.m3u8`,
         mediaType: 'hls',

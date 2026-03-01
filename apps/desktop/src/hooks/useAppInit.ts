@@ -11,6 +11,7 @@ export function useAppInit() {
     queueAutoStart: true,
     checkUpdatesOnStartup: true,
     tmdbApiKey: '',
+    subdlApiKey: '',
     downloadThreads: 8,
   });
   const [updater, setUpdater] = useState<UpdaterState>({

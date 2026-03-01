@@ -41,6 +41,7 @@ function readSettings() {
         queueAutoStart: true,
         checkUpdatesOnStartup: true,
         tmdbApiKey: '',
+        subdlApiKey: '',
         downloadThreads: 8,
       };
     }
@@ -50,6 +51,7 @@ function readSettings() {
       queueAutoStart: parsed.queueAutoStart ?? true,
       checkUpdatesOnStartup: parsed.checkUpdatesOnStartup ?? true,
       tmdbApiKey: parsed.tmdbApiKey ?? '',
+      subdlApiKey: parsed.subdlApiKey ?? '',
       downloadThreads: parsed.downloadThreads ?? 8,
     };
   } catch {
@@ -58,6 +60,7 @@ function readSettings() {
       queueAutoStart: true,
       checkUpdatesOnStartup: true,
       tmdbApiKey: '',
+      subdlApiKey: '',
       downloadThreads: 8,
     };
   }
@@ -289,6 +292,9 @@ async function startLocalApi() {
   if (savedSettings.tmdbApiKey) {
     process.env.TMDB_API_KEY = savedSettings.tmdbApiKey;
   }
+  if (savedSettings.subdlApiKey) {
+    process.env.SUBDL_API_KEY = savedSettings.subdlApiKey;
+  }
 
   const { createApiServer } = require('@m3u8/downloader-api');
   const apiConfig = require('@m3u8/downloader-api/src/config');
@@ -384,6 +390,9 @@ function registerIpc() {
     if ('tmdbApiKey' in (nextSettings || {})) {
       apiConfig.tmdbApiKey = merged.tmdbApiKey || '';
     }
+    if ('subdlApiKey' in (nextSettings || {})) {
+      apiConfig.subdlApiKey = merged.subdlApiKey || '';
+    }
     if ('downloadThreads' in (nextSettings || {})) {
       apiConfig.downloadThreads = Number(merged.downloadThreads) || 0;
     }
@@ -456,7 +465,6 @@ function registerIpc() {
       const dataDir = path.join(userDataDir, 'data');
       const downloadDir = path.join(dataDir, 'downloads');
       const queueFile = path.join(downloadDir, 'queue.json');
-      const authFile = path.join(dataDir, 'auth.json');
       const settingsFile = appSettingsPath();
 
       const bundleDir = buildSupportBundleDirPath();
@@ -477,14 +485,6 @@ function registerIpc() {
         'utf8',
       );
       included.push('queue.snapshot.json');
-
-      const authSnapshotPath = path.join(bundleDir, 'auth.snapshot.json');
-      fs.writeFileSync(
-        authSnapshotPath,
-        JSON.stringify(safeReadJson(authFile, { pairing: null, tokens: [] }), null, 2),
-        'utf8',
-      );
-      included.push('auth.snapshot.json');
 
       const metaPath = path.join(bundleDir, 'bundle.meta.json');
       fs.writeFileSync(metaPath, JSON.stringify({
@@ -533,28 +533,6 @@ function registerIpc() {
     } catch (err) {
       return { ok: false, error: String(err.message || err) };
     }
-  });
-
-  ipcMain.handle('auth:generate-pairing-code', async () => {
-    if (!apiServer) {
-      throw new Error('API server not started');
-    }
-    return apiServer.authManager.generatePairingCode();
-  });
-
-  ipcMain.handle('auth:list-tokens', async () => {
-    if (!apiServer) return [];
-    return apiServer.authManager.listTokens();
-  });
-
-  ipcMain.handle('auth:revoke-token', async (event, tokenId) => {
-    if (!apiServer) return { ok: false };
-    return { ok: apiServer.authManager.revokeToken(tokenId) };
-  });
-
-  ipcMain.handle('auth:revoke-all', async () => {
-    if (!apiServer) return { ok: false };
-    return { ok: apiServer.authManager.revokeAll() };
   });
 
   ipcMain.handle('updater:get-state', async () => ({ ...updaterState }));

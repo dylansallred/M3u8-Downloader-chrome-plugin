@@ -19,13 +19,8 @@ const CLIENT = {
   extension: 'fetchv-extension',
 };
 
-const TOKEN = {
-  pairingTtlMs: 10 * 60 * 1000,
-};
-
 module.exports = {
   API,
   HEADER,
   CLIENT,
-  TOKEN,
 };

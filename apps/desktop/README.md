@@ -15,5 +15,5 @@ On startup the desktop app:
 
 - Starts local API server on `127.0.0.1:49732`
 - Hosts queue/history/download management endpoints
-- Exposes extension pairing and token controls via Settings
+- Accepts extension bridge requests from local machine without pairing
 - Checks GitHub Releases for updates (startup + every 6 hours)

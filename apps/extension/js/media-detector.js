@@ -10,14 +10,54 @@
   'use strict';
 
   // Media detection patterns
-  const MEDIA_EXTENSIONS = /\.(m3u8|mpd|mp4|webm|mkv|avi|mov|flv|ts|m4s)(\?.*)?$/i;
-  const MEDIA_CONTENT_TYPES = /^(video|audio|application\/(x-mpegURL|vnd\.apple\.mpegURL|dash\+xml))/i;
+  const MEDIA_EXTENSIONS = /\.(m3u8|m3u|mpd|mp4|m4v|webm|mkv|avi|mov|flv|f4v|wmv|asf|ts|m2ts|mts|m4s|mpg|mpeg|3gp|3g2|ogv|ogm|mxf|ism|ismc|m4a|aac|mp3|ogg|oga|wav|flac)(\?.*)?$/i;
+  const MEDIA_CONTENT_TYPES = /^(video\/|audio\/|application\/(x-mpegurl|vnd\.apple\.mpegurl|dash\+xml))/i;
+  const HLS_MARKERS = /(\.m3u8(\?|$)|application\/x-mpegurl|application\/vnd\.apple\.mpegurl)/i;
+  const DASH_MARKERS = /(\.mpd(\?|$)|application\/dash\+xml|application\/vnd\.ms-sstr\+xml)/i;
+  const SEGMENT_MARKERS = /(\.(ts|m4s|m4f|cmfa|cmfv)(\?|$)|video\/mp2t)/i;
+  const AUDIO_MARKERS = /(\.(m4a|aac|mp3|ogg|oga|wav|flac)(\?|$)|^audio\/)/i;
 
   // Minimum file size to consider (avoid tiny files like favicons)
   const MIN_MEDIA_SIZE = 1024 * 100; // 100KB
 
   // Track detected media to avoid duplicates
   const detectedMedia = new Set();
+
+  function extractFilename(url, contentDisposition) {
+    if (contentDisposition) {
+      const filenameMatch = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
+      if (filenameMatch && filenameMatch[1]) {
+        return filenameMatch[1].replace(/['"]/g, '').trim();
+      }
+    }
+
+    try {
+      const urlObj = new URL(url);
+      const pathname = urlObj.pathname;
+      const pathParts = pathname.split('/').filter((part) => part.length > 0);
+      if (pathParts.length > 0) {
+        const finalPart = pathParts[pathParts.length - 1];
+        return decodeURIComponent(finalPart.split('?')[0]);
+      }
+    } catch (_) {
+      // ignore URL parsing errors
+    }
+
+    return 'media';
+  }
+
+  function detectMediaKind(url, contentType, filename) {
+    const target = `${String(url || '')} ${String(filename || '')} ${String(contentType || '').toLowerCase()}`;
+    if (HLS_MARKERS.test(target)) return 'hls-manifest';
+    if (DASH_MARKERS.test(target)) return 'dash-manifest';
+    if (SEGMENT_MARKERS.test(target)) return 'segment';
+    if (AUDIO_MARKERS.test(target)) return 'audio';
+    return 'video';
+  }
+
+  function hasKnownMediaExtension(value) {
+    return MEDIA_EXTENSIONS.test(String(value || '').toLowerCase());
+  }
 
   /**
    * Analyze a response to determine if it's a media file
@@ -33,12 +73,19 @@
         return null;
       }
 
-      // Check URL extension
-      const hasMediaExtension = MEDIA_EXTENSIONS.test(url);
+      const contentDisposition = headers['content-disposition'] || '';
+      const filename = extractFilename(url, contentDisposition);
+      const hasMediaExtension = hasKnownMediaExtension(url) || hasKnownMediaExtension(filename);
 
       // Check Content-Type header
       const contentType = headers['content-type'] || '';
       const hasMediaContentType = MEDIA_CONTENT_TYPES.test(contentType);
+      const matchedBy = [];
+      if (hasKnownMediaExtension(url)) matchedBy.push('url-extension');
+      if (hasKnownMediaExtension(filename) && !matchedBy.includes('url-extension')) {
+        matchedBy.push('content-disposition');
+      }
+      if (hasMediaContentType) matchedBy.push('content-type');
 
       // Check Content-Length
       const contentLength = parseInt(headers['content-length'] || '0', 10);
@@ -54,33 +101,6 @@
         return null;
       }
 
-      // Extract filename from Content-Disposition
-      const contentDisposition = headers['content-disposition'] || '';
-      let filename = '';
-      if (contentDisposition) {
-        const filenameMatch = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
-        if (filenameMatch && filenameMatch[1]) {
-          filename = filenameMatch[1].replace(/['"]/g, '').trim();
-        }
-      }
-
-      // If no filename from header, extract from URL
-      if (!filename) {
-        try {
-          const urlObj = new URL(url);
-          const pathname = urlObj.pathname;
-          const pathParts = pathname.split('/').filter(p => p.length > 0);
-          if (pathParts.length > 0) {
-            filename = pathParts[pathParts.length - 1];
-            // Remove query params from filename
-            filename = filename.split('?')[0];
-          }
-        } catch (e) {
-          // URL parsing failed, use fallback
-          filename = 'media';
-        }
-      }
-
       // Create unique key for deduplication
       const uniqueKey = `${url}|${contentLength}`;
       if (detectedMedia.has(uniqueKey)) {
@@ -90,11 +110,15 @@
 
       return {
         url,
+        statusCode,
         contentType,
         contentLength,
+        contentDisposition,
         filename,
         detectedAt: Date.now(),
-        method: 'unknown' // Will be set by caller
+        method: 'unknown', // Will be set by caller
+        mediaKind: detectMediaKind(url, contentType, filename),
+        matchedBy,
       };
     } catch (error) {
       console.error('[FetchV MediaDetector] Error analyzing response:', error);

@@ -1,5 +1,4 @@
 import type { DesktopSettings } from './settings';
-import type { PairingCode, Token } from './pairing';
 import type { UpdaterState } from './updater';
 
 export interface AppInfo {
@@ -12,10 +11,6 @@ export interface DesktopBridge {
   getAppInfo(): Promise<AppInfo>;
   getSettings(): Promise<DesktopSettings>;
   saveSettings(settings: Partial<DesktopSettings>): Promise<DesktopSettings>;
-  generatePairingCode(): Promise<PairingCode>;
-  listTokens(): Promise<Token[]>;
-  revokeToken(tokenId: string): Promise<{ ok: boolean }>;
-  revokeAllTokens(): Promise<{ ok: boolean }>;
   getUpdaterState(): Promise<UpdaterState>;
   checkForUpdates(): Promise<{ ok: boolean }>;
   installUpdateNow(): Promise<{ ok: boolean }>;

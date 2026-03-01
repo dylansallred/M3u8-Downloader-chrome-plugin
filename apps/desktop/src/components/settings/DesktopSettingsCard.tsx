@@ -12,7 +12,8 @@ interface DesktopSettingsCardProps {
 }
 
 export function DesktopSettingsCard({ settings, onSave }: DesktopSettingsCardProps) {
-  const [showKey, setShowKey] = useState(false);
+  const [showTmdbKey, setShowTmdbKey] = useState(false);
+  const [showSubdlKey, setShowSubdlKey] = useState(false);
 
   return (
     <Card className="bg-background-raised border-border">
@@ -76,7 +77,7 @@ export function DesktopSettingsCard({ settings, onSave }: DesktopSettingsCardPro
           </p>
           <div className="flex items-center gap-2">
             <Input
-              type={showKey ? 'text' : 'password'}
+              type={showTmdbKey ? 'text' : 'password'}
               placeholder="Enter your TMDB API key"
               value={settings.tmdbApiKey || ''}
               onChange={(e) => onSave({ tmdbApiKey: e.target.value })}
@@ -86,9 +87,42 @@ export function DesktopSettingsCard({ settings, onSave }: DesktopSettingsCardPro
               variant="ghost"
               size="sm"
               className="h-8 px-2"
-              onClick={() => setShowKey(!showKey)}
+              onClick={() => setShowTmdbKey(!showTmdbKey)}
             >
-              {showKey ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+              {showTmdbKey ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+            </Button>
+          </div>
+        </div>
+
+        <div className="border-t border-border pt-4 space-y-2">
+          <label className="text-sm text-foreground font-medium">SubDL API Key</label>
+          <p className="text-xs text-foreground-muted">
+            Enables automatic subtitle lookup/download for queued jobs.{' '}
+            <a
+              href="https://subdl.com/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-primary hover:underline"
+            >
+              Get an API key
+            </a>{' '}
+            from your SubDL account.
+          </p>
+          <div className="flex items-center gap-2">
+            <Input
+              type={showSubdlKey ? 'text' : 'password'}
+              placeholder="Enter your SubDL API key"
+              value={settings.subdlApiKey || ''}
+              onChange={(e) => onSave({ subdlApiKey: e.target.value })}
+              className="flex-1 h-8 text-sm bg-background border-border font-mono"
+            />
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 px-2"
+              onClick={() => setShowSubdlKey(!showSubdlKey)}
+            >
+              {showSubdlKey ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
             </Button>
           </div>
         </div>

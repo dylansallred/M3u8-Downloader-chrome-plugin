@@ -336,11 +336,8 @@ test('settings view shows API compatibility details from health endpoint', async
     // UpdaterCard should be present
     await expect(page.getByText('Updates', { exact: true })).toBeVisible();
 
-    // Extension Pairing card should be present
-    await expect(page.getByText('Extension Pairing')).toBeVisible();
-
-    // No paired extensions when listTokens returns []
-    await expect(page.getByText('No paired extensions.')).toBeVisible();
+    // Pairing UI has been removed from settings.
+    await expect(page.getByText('Extension Pairing')).toHaveCount(0);
   } finally {
     await renderer.close();
   }
@@ -679,141 +676,8 @@ test('sidebar shows compatibility warning when health check fails', async ({ pag
     await page.getByRole('button', { name: 'Compatibility Warning' }).click();
     await expect(page.getByRole('heading', { name: 'Settings', exact: true })).toBeAttached();
 
-    // The paired extension with version 1.0.0 should appear in the table
-    await expect(page.getByRole('cell', { name: 'test-ext' })).toBeVisible();
-  } finally {
-    await renderer.close();
-  }
-});
-
-test('settings can revoke tokens and the table updates', async ({ page }) => {
-  const renderer = await startDesktopRendererServer();
-
-  try {
-    await page.addInitScript(() => {
-      const listeners = [];
-      const tokensState = [
-        {
-          id: 'token-old',
-          extensionId: 'test-ext-old',
-          extensionVersion: '1.0.0',
-          browser: 'chrome',
-          createdAt: Date.now(),
-          lastUsedAt: null,
-        },
-        {
-          id: 'token-new',
-          extensionId: 'test-ext-new',
-          extensionVersion: '1.3.0',
-          browser: 'chrome',
-          createdAt: Date.now(),
-          lastUsedAt: null,
-        },
-      ];
-
-      window.desktop = {
-        getAppInfo: async () => ({ apiBaseUrl: window.location.origin }),
-        getSettings: async () => ({
-          queueMaxConcurrent: 1,
-          queueAutoStart: true,
-          checkUpdatesOnStartup: true,
-        }),
-        saveSettings: async (settings) => ({
-          queueMaxConcurrent: settings?.queueMaxConcurrent ?? 1,
-          queueAutoStart: settings?.queueAutoStart ?? true,
-          checkUpdatesOnStartup: settings?.checkUpdatesOnStartup ?? true,
-        }),
-        generatePairingCode: async () => ({
-          code: 'TEST1234',
-          expiresAt: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
-        }),
-        listTokens: async () => tokensState.slice(),
-        revokeToken: async (tokenId) => {
-          const idx = tokensState.findIndex((token) => token.id === tokenId);
-          if (idx >= 0) tokensState.splice(idx, 1);
-          return { ok: idx >= 0 };
-        },
-        revokeAllTokens: async () => {
-          tokensState.splice(0, tokensState.length);
-          return { ok: true };
-        },
-        getUpdaterState: async () => ({ phase: 'idle', message: 'Idle', progress: 0 }),
-        checkForUpdates: async () => ({ ok: true }),
-        installUpdateNow: async () => ({ ok: true }),
-        onUpdaterEvent: (cb) => {
-          listeners.push(cb);
-          return () => {
-            const idx = listeners.indexOf(cb);
-            if (idx >= 0) listeners.splice(idx, 1);
-          };
-        },
-      };
-    });
-
-    await page.route('**/api/queue', async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ queue: [], settings: { maxConcurrent: 1, autoStart: true } }),
-      });
-    });
-
-    await page.route('**/api/history', async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ items: [] }),
-      });
-    });
-
-    await page.route('**/v1/health', async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          status: 'ok',
-          appVersion: '9.9.9',
-          apiVersion: '1',
-          protocolVersion: '1',
-          supportedProtocolVersions: { min: 1, max: 1 },
-          minExtensionVersion: '1.2.3',
-          pairingRequired: false,
-          wsPath: '/ws',
-        }),
-      });
-    });
-
-    await page.goto(renderer.baseUrl);
-    await page.getByRole('button', { name: 'Settings' }).click();
-
-    // PairingCard renders "Paired Extensions" as h4 text
-    await expect(page.getByText('Paired Extensions')).toBeVisible();
-
-    // Both tokens should appear in the table
-    await expect(page.getByRole('cell', { name: 'test-ext-old' })).toBeVisible();
-    await expect(page.getByRole('cell', { name: 'test-ext-new' })).toBeVisible();
-
-    // Status badges use Badge component text "outdated" / "compatible" (not .status-pill classes)
-    await expect(page.getByText('outdated')).toBeVisible();
-    await expect(page.getByText('compatible')).toBeVisible();
-
-    // Filter to outdated using Radix Select (click trigger, then click option)
-    await page.getByLabel('Filter').click();
-    await page.getByRole('option', { name: 'Outdated' }).click();
-    await expect(page.getByRole('cell', { name: 'test-ext-old' })).toBeVisible();
-    await expect(page.getByRole('cell', { name: 'test-ext-new' })).toHaveCount(0);
-
-    // Reset filter to all
-    await page.getByLabel('Filter').click();
-    await page.getByRole('option', { name: 'All' }).click();
-
-    // "Revoke All" button (previously "Revoke Outdated Tokens")
-    await expect(page.getByRole('button', { name: 'Revoke All' })).toBeEnabled();
-    await page.getByRole('button', { name: 'Revoke All' }). click();
-
-    // After revoking all, the table should be empty
-    await expect(page.getByRole('cell', { name: 'test-ext-old' })).toHaveCount(0);
-    await expect(page.getByRole('cell', { name: 'test-ext-new' })).toHaveCount(0);
+    // Settings view should still render correctly despite compatibility failures.
+    await expect(page.getByText('Preferences')).toBeVisible();
   } finally {
     await renderer.close();
   }

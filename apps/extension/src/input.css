@@ -57,13 +57,48 @@
   color-scheme: dark;
 }
 
+html,
 body {
   width: 400px;
+  height: 600px;
+  max-height: 600px;
   margin: 0;
   background: linear-gradient(160deg, var(--color-bg-elevated), var(--color-bg-base));
   color: var(--color-fg);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  overscroll-behavior: none;
+}
+
+header,
+footer {
+  flex-shrink: 0;
+}
+
+#detectedMediaSection {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+#mediaScrollArea {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: none;
+}
+
+#mediaList {
+  min-height: 0;
+}
+
+#emptyState {
+  min-height: 100%;
 }
 
 /* ================================================================
@@ -283,6 +318,70 @@ body {
 .btn-copy.copied {
   color: var(--color-accent);
   border-color: rgba(49, 196, 141, 0.3);
+}
+
+.btn-icon-danger {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 6px;
+  border: 1px solid rgba(225, 107, 107, 0.25);
+  background: rgba(225, 107, 107, 0.12);
+  color: var(--color-danger);
+  cursor: pointer;
+  transition: all 150ms ease;
+}
+
+.btn-icon-danger:hover {
+  background: rgba(225, 107, 107, 0.2);
+  border-color: rgba(225, 107, 107, 0.45);
+}
+
+.btn-icon-danger:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* ================================================================
+   DETAILS PANEL
+   ================================================================ */
+
+.details-panel {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--color-border-subtle);
+  background: rgba(17, 24, 49, 0.45);
+}
+
+.details-summary {
+  margin: 0;
+  font-size: 0.6875rem;
+  line-height: 1.4;
+  color: var(--color-fg-muted);
+}
+
+.details-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 0 6px;
+}
+
+.details-json {
+  margin: 0;
+  max-height: 170px;
+  overflow: auto;
+  white-space: pre;
+  font-family: var(--font-mono);
+  font-size: 0.625rem;
+  line-height: 1.45;
+  color: var(--color-fg-subtle);
 }
 
 /* ================================================================

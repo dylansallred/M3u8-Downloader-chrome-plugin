@@ -71,7 +71,8 @@ async function lookupPoster({ apiKey, title, type }) {
       try {
         tvImages = await fetchJson(`https://api.themoviedb.org/3/tv/${tvFirst.id}/images?api_key=${apiKey}`);
       } catch (_) {}
-      return buildResult(tvFirst, tvDetails, tvImages);
+      const result = buildResult(tvFirst, tvDetails, tvImages);
+      return result ? { ...result, mediaType: 'tv' } : null;
     } catch (_) {
       return null;
     }
@@ -90,7 +91,8 @@ async function lookupPoster({ apiKey, title, type }) {
       try {
         movieImages = await fetchJson(`https://api.themoviedb.org/3/movie/${movieFirst.id}/images?api_key=${apiKey}`);
       } catch (_) {}
-      return buildResult(movieFirst, movieDetails, movieImages);
+      const result = buildResult(movieFirst, movieDetails, movieImages);
+      return result ? { ...result, mediaType: 'movie' } : null;
     } catch (_) {
       return null;
     }
@@ -100,10 +102,10 @@ async function lookupPoster({ apiKey, title, type }) {
     const query = encodeURIComponent(title);
 
     if (type === 'tv') {
-      return await searchTv(query);
+      return (await searchTv(query)) || (await searchMovie(query));
     }
     if (type === 'movie') {
-      return await searchMovie(query);
+      return (await searchMovie(query)) || (await searchTv(query));
     }
 
     // Default: movie first, then TV

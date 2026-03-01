@@ -18,6 +18,7 @@ export interface TmdbMetadata {
   runtime?: number;
   tagline?: string;
   genres?: string[];
+  mediaType?: 'movie' | 'tv';
 }
 
 export interface QueueJob {

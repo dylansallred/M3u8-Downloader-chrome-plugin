@@ -7,7 +7,7 @@ This repository now contains a phased Electron rebuild of the original local dow
 - `apps/desktop`: Electron desktop app (main process, preload, React renderer).
 - `apps/extension`: Chrome extension v1 (detection + send-to-desktop API bridge).
 - `packages/downloader-engine`: Reused downloader core modules (queue, HLS/direct job processing, FFmpeg integration).
-- `packages/downloader-api`: Local API server (`127.0.0.1:49732`) with pairing/token auth for extension endpoints.
+- `packages/downloader-api`: Local API server (`127.0.0.1:49732`) for extension bridge and desktop queue endpoints.
 - `packages/contracts`: Shared API constants.
 
 ## Quick Start
@@ -36,10 +36,9 @@ This starts:
 - Enable Developer Mode
 - Load unpacked from `apps/extension`
 
-4. Pair extension with desktop app:
+4. Open extension popup while desktop app is running:
 
-- In desktop app Settings, click `Generate Pairing Code`
-- In extension popup, enter the code and click `Pair`
+- Extension connects directly to local API at `127.0.0.1` and can queue jobs immediately.
 
 ## Current Capabilities
 
@@ -56,7 +55,6 @@ This starts:
     - Export support bundle
 - Extension:
   - Stream/media detection and send-to-desktop over local `/v1` bridge
-  - Pairing flow and token-based auth
   - Protocol/version compatibility checks and update-required UX
 
 ## API Summary
@@ -64,10 +62,9 @@ This starts:
 Extension bridge contract (`/v1`, extension-only, auth where noted):
 
 - `GET /v1/health`
-- `POST /v1/pair/complete`
-- `POST /v1/jobs` (auth required)
-- `GET /v1/queue` (auth required)
-- `POST /v1/app/focus` (auth required)
+- `POST /v1/jobs`
+- `GET /v1/queue`
+- `POST /v1/app/focus`
 
 Desktop-internal endpoints (`/api`, not for extension clients):
 

@@ -5,26 +5,18 @@ const logger = require('../utils/logger');
 const { jobValidation, jobIdValidation } = require('../utils/validators');
 const { lookupPoster } = require('../services/tmdb');
 const { fetchAndSaveSubtitles } = require('../services/subdl');
+const { inferMediaMetadata } = require('../utils/mediaMetadata');
 const config = require('../config');
 
-const SUBDL_API_KEY = process.env.SUBDL_API_KEY;
-
-if (!SUBDL_API_KEY) {
+if (!config.subdlApiKey) {
   logger.warn('SUBDL_API_KEY environment variable not set - subtitle download will be disabled');
 }
-
-// Remove season/episode tokens for external lookups (TMDB/SubDL) while keeping display name intact.
-const deriveLookupTitle = (raw) => {
-  if (!raw) return '';
-  const cleaned = raw.replace(/s\d{1,2}e\d{1,2}/i, '').trim();
-  return cleaned || raw;
-};
 
 async function fetchSubtitlesForJob(job, downloadDir, queueManager, opts = {}) {
   if (!job) return;
 
   // Skip subtitle fetch if API key is not configured
-  if (!SUBDL_API_KEY) {
+  if (!config.subdlApiKey) {
     logger.debug('Skipping subtitle fetch - SUBDL_API_KEY not configured', { jobId: job.id });
     return;
   }
@@ -32,7 +24,7 @@ async function fetchSubtitlesForJob(job, downloadDir, queueManager, opts = {}) {
   try {
     const { seasonNumber, episodeNumber, type, lookupTitle } = opts;
     const result = await fetchAndSaveSubtitles({
-      apiKey: SUBDL_API_KEY,
+      apiKey: config.subdlApiKey,
       title: lookupTitle || job.title,
       tmdbId: job.tmdbId,
       imdbId: job.imdbId,
@@ -163,6 +155,7 @@ function registerJobRoutes(
       title: baseName || queue.title || queue.name || 'Download',
       url: queue.url,
       headers: queue.headers || {},
+      sourcePageUrl: queue.sourcePageUrl || '',
       totalSegments: 0,
       completedSegments: 0,
       bytesDownloaded: 0,
@@ -195,15 +188,55 @@ function registerJobRoutes(
       lastSentSegmentStates: {}, // Track what we last sent to client for delta updates
     };
 
-    // Derive a TMDB/SubDL-friendly title by stripping SxxExx and trimming.
-    const lookupTitle = deriveLookupTitle(job.title);
-    const matchSeasonEp = (job.title || "").match(/s(\d{1,2})e(\d{1,2})/i);
-    const seasonNumber = matchSeasonEp ? parseInt(matchSeasonEp[1], 10) : undefined;
-    const episodeNumber = matchSeasonEp ? parseInt(matchSeasonEp[2], 10) : undefined;
-    const isTv = !!matchSeasonEp;
+    const inferredHints = inferMediaMetadata({
+      title: job.title,
+      resourceName: queue.name,
+      sourcePageTitle: queue.title,
+      mediaUrl: queue.url,
+      sourcePageUrl: queue.sourcePageUrl,
+    });
+    const mediaHints = {
+      ...inferredHints,
+      ...(queue.titleHints && typeof queue.titleHints === 'object' ? queue.titleHints : {}),
+      lookupTitle: (
+        (queue.titleHints && typeof queue.titleHints.lookupTitle === 'string' ? queue.titleHints.lookupTitle : '')
+        || inferredHints.lookupTitle
+        || ''
+      ).trim(),
+      seasonNumber: Number.isFinite(queue.titleHints && queue.titleHints.seasonNumber)
+        ? queue.titleHints.seasonNumber
+        : inferredHints.seasonNumber,
+      episodeNumber: Number.isFinite(queue.titleHints && queue.titleHints.episodeNumber)
+        ? queue.titleHints.episodeNumber
+        : inferredHints.episodeNumber,
+      isTvCandidate: Boolean(
+        (queue.titleHints && queue.titleHints.isTvCandidate)
+        || inferredHints.isTvCandidate
+        || (
+          Number.isFinite(queue.titleHints && queue.titleHints.seasonNumber)
+          && Number.isFinite(queue.titleHints && queue.titleHints.episodeNumber)
+        )
+      ),
+    };
+    job.mediaHints = mediaHints;
+
+    const lookupTitle = mediaHints.lookupTitle || job.title || job.downloadName;
+    const seasonNumber = Number.isFinite(mediaHints.seasonNumber) ? mediaHints.seasonNumber : undefined;
+    const episodeNumber = Number.isFinite(mediaHints.episodeNumber) ? mediaHints.episodeNumber : undefined;
+    const isTv = !!mediaHints.isTvCandidate;
 
     // Add to queue or start immediately based on query parameter
-    logger.info('Job create request', { jobId: id, maxConcurrent: clampedThreads, url: queue.url });
+    logger.info('Job create request', {
+      jobId: id,
+      maxConcurrent: clampedThreads,
+      url: queue.url,
+      lookupTitle,
+      isTvCandidate: isTv,
+      seasonNumber: seasonNumber || null,
+      episodeNumber: episodeNumber || null,
+      matchedPattern: mediaHints.matchedPattern,
+      matchedField: mediaHints.matchedField,
+    });
 
     if (immediate) {
       // Legacy behavior: start immediately without queue
@@ -220,7 +253,15 @@ function registerJobRoutes(
         } else {
           const title = lookupTitle || job.title || job.downloadName;
           const type = isTv ? 'tv' : 'movie';
-          logger.info('TMDB lookup start', { jobId: job.id, title, type });
+          logger.info('TMDB lookup start', {
+            jobId: job.id,
+            title,
+            type,
+            seasonNumber: seasonNumber || null,
+            episodeNumber: episodeNumber || null,
+            matchedPattern: mediaHints.matchedPattern,
+            matchedField: mediaHints.matchedField,
+          });
 
           try {
             const tmdbResult = await lookupPoster({ apiKey: config.tmdbApiKey, title, type });
@@ -236,6 +277,7 @@ function registerJobRoutes(
                 runtime: tmdbResult.runtime,
                 tagline: tmdbResult.tagline,
                 genres: tmdbResult.genres,
+                mediaType: tmdbResult.mediaType || type,
               };
               job.skipThumbnailGeneration = true;
               queueManager.saveQueue();
@@ -271,7 +313,15 @@ function registerJobRoutes(
         } else {
           const title = lookupTitle || job.title || job.downloadName;
           const type = isTv ? 'tv' : 'movie';
-          logger.info('TMDB lookup start', { jobId: job.id, title, type });
+          logger.info('TMDB lookup start', {
+            jobId: job.id,
+            title,
+            type,
+            seasonNumber: seasonNumber || null,
+            episodeNumber: episodeNumber || null,
+            matchedPattern: mediaHints.matchedPattern,
+            matchedField: mediaHints.matchedField,
+          });
 
           try {
             const tmdbResult = await lookupPoster({ apiKey: config.tmdbApiKey, title, type });
@@ -287,6 +337,7 @@ function registerJobRoutes(
                 runtime: tmdbResult.runtime,
                 tagline: tmdbResult.tagline,
                 genres: tmdbResult.genres,
+                mediaType: tmdbResult.mediaType || type,
               };
               job.skipThumbnailGeneration = true;
               queueManager.saveQueue();
@@ -396,6 +447,7 @@ function registerJobRoutes(
       tmdbTitle: job.tmdbTitle || null,
       tmdbReleaseDate: job.tmdbReleaseDate || null,
       tmdbMetadata: job.tmdbMetadata || null,
+      mediaHints: job.mediaHints || null,
     });
   });
 
