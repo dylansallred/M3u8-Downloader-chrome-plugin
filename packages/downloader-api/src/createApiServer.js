@@ -18,7 +18,6 @@ const registerHistoryRoutes = require('./routes/history');
 const registerQueueRoutes = require('./routes/queue');
 const registerJobRoutes = require('./routes/jobs');
 const logger = require('./utils/logger');
-const { jobValidation } = require('./utils/validators');
 const { lookupPoster } = require('./services/tmdb');
 const appConfig = require('./config');
 const AuthManager = require('./auth/AuthManager');
@@ -136,8 +135,18 @@ function createApiServer(options = {}) {
   app.use('/api', apiLimiter);
   app.use('/v1', apiLimiter);
   app.use('/api/jobs', jobCreationLimiter);
-  app.use('/api/queue/add', jobCreationLimiter);
   app.use('/v1/jobs', jobCreationLimiter);
+
+  // Lock /api routes to desktop-local usage boundaries. Extension bridge must use /v1.
+  app.use('/api', (req, res, next) => {
+    const origin = String(req.headers.origin || '').trim();
+    const client = String(req.headers[HEADER.client.toLowerCase()] || '').trim();
+    if (origin.startsWith('chrome-extension://') || client === CLIENT.extension) {
+      res.status(403).json({ error: 'Use /v1 extension bridge endpoints for extension clients' });
+      return;
+    }
+    next();
+  });
 
   const jobs = new Map();
 
@@ -211,6 +220,10 @@ function createApiServer(options = {}) {
       threadStates: Array.isArray(job.threadStates) ? job.threadStates : [],
       segmentStates: job.segmentStates || {},
       error: job.error,
+      fallbackUrl: job.fallbackUrl || null,
+      originalHlsUrl: job.originalHlsUrl || null,
+      fallbackAttempted: !!job.fallbackAttempted,
+      fallbackUsed: !!job.fallbackUsed,
       thumbnailUrls: mergeThumbnailUrls(job),
       updatedAt: job.updatedAt,
     };
@@ -237,10 +250,23 @@ function createApiServer(options = {}) {
 
     const fileNameBase = safeFilename(baseName);
     const isHls = /\.m3u8(\?|$)/i.test(queue.url || '');
+    const requestedFallbackUrl = sanitizeString(
+      (settings && settings.fallbackMediaUrl) || queue.fallbackUrl || '',
+      4096,
+    );
+    const fallbackMediaUrl =
+      requestedFallbackUrl
+      && requestedFallbackUrl !== queue.url
+      && isValidHttpUrl(requestedFallbackUrl)
+        ? requestedFallbackUrl
+        : '';
 
     let filePath;
     let tsName;
     let downloadNameMp4;
+    let directFallbackFilePath = null;
+    let directFallbackDownloadName = null;
+    let directFallbackDownloadNameMp4 = null;
 
     if (isHls) {
       tsName = fileNameBase;
@@ -257,6 +283,24 @@ function createApiServer(options = {}) {
         downloadNameMp4 = downloadNameMp4.replace(/\.m3u8$/i, '.mp4');
       } else if (!/\.[a-z0-9]{2,4}$/i.test(downloadNameMp4)) {
         downloadNameMp4 = `${downloadNameMp4}.mp4`;
+      }
+
+      if (fallbackMediaUrl) {
+        let ext = '';
+        try {
+          const fallbackParsed = new URL(fallbackMediaUrl);
+          ext = path.extname(fallbackParsed.pathname) || '';
+        } catch {
+          ext = '';
+        }
+
+        if (!ext || !/^\.[a-z0-9]{2,4}$/i.test(ext)) {
+          ext = '.mp4';
+        }
+
+        directFallbackDownloadName = `${fileNameBase}${ext}`;
+        directFallbackDownloadNameMp4 = directFallbackDownloadName;
+        directFallbackFilePath = path.join(resolvedDownloadDir, `${id}-${directFallbackDownloadName}`);
       }
     } else {
       let ext = '';
@@ -298,6 +342,15 @@ function createApiServer(options = {}) {
       thumbnailUrls: [],
       skipThumbnailGeneration: true,
       downloadNameMp4,
+      fallbackUrl: fallbackMediaUrl || null,
+      originalHlsUrl: isHls ? queue.url : null,
+      originalHlsDownloadName: isHls ? tsName : null,
+      originalHlsDownloadNameMp4: isHls ? downloadNameMp4 : null,
+      directFallbackFilePath,
+      directFallbackDownloadName,
+      directFallbackDownloadNameMp4,
+      fallbackAttempted: false,
+      fallbackUsed: false,
       cancelled: false,
       maxConcurrent: Number.isFinite(threads) && threads > 0
         ? Math.min(16, threads)
@@ -349,6 +402,19 @@ function createApiServer(options = {}) {
     return { ...result, job };
   }
 
+  function findDuplicateQueuedJob(url) {
+    if (!isValidHttpUrl(url)) return null;
+    const normalizedUrl = String(url).trim();
+    for (const job of jobs.values()) {
+      if (!job) continue;
+      if (String(job.url || '').trim() !== normalizedUrl) continue;
+      if (job.queueStatus === 'queued' || job.queueStatus === 'downloading' || job.queueStatus === 'paused') {
+        return job;
+      }
+    }
+    return null;
+  }
+
   function parseBearerToken(req) {
     const authHeader = req.headers.authorization || req.headers.Authorization;
     if (!authHeader || typeof authHeader !== 'string') return null;
@@ -356,17 +422,84 @@ function createApiServer(options = {}) {
     return match ? match[1] : null;
   }
 
+  function parseVersionParts(input) {
+    return String(input || '')
+      .split(/[^0-9]+/)
+      .filter(Boolean)
+      .map((part) => Number.parseInt(part, 10))
+      .map((part) => (Number.isFinite(part) && part >= 0 ? part : 0));
+  }
+
+  function compareVersions(a, b) {
+    const ap = parseVersionParts(a);
+    const bp = parseVersionParts(b);
+    const len = Math.max(ap.length, bp.length);
+    for (let i = 0; i < len; i += 1) {
+      const av = ap[i] || 0;
+      const bv = bp[i] || 0;
+      if (av > bv) return 1;
+      if (av < bv) return -1;
+    }
+    return 0;
+  }
+
+  function normalizeProtocolVersion(version) {
+    const parsed = Number.parseInt(String(version || '').trim(), 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : Number.parseInt(API.protocolVersion, 10);
+  }
+
+  function getCompatibilityInfo() {
+    const minProtocol = normalizeProtocolVersion(API.minProtocolVersion || API.protocolVersion);
+    const maxProtocol = normalizeProtocolVersion(API.maxProtocolVersion || API.protocolVersion);
+    const currentProtocol = normalizeProtocolVersion(API.protocolVersion);
+
+    return {
+      protocolVersion: currentProtocol,
+      supportedProtocolVersions: {
+        min: Math.min(minProtocol, maxProtocol),
+        max: Math.max(minProtocol, maxProtocol),
+      },
+      minExtensionVersion: API.minExtensionVersion || '1.0.0',
+    };
+  }
+
   function validateV1ClientHeaders(req, res, next) {
     const client = String(req.headers[HEADER.client.toLowerCase()] || '').trim();
     const protocolVersion = String(req.headers[HEADER.protocolVersion.toLowerCase()] || '').trim();
+    const compatibility = getCompatibilityInfo();
 
     if (client && client !== CLIENT.extension) {
       res.status(400).json({ error: `Invalid ${HEADER.client} header` });
       return;
     }
 
-    if (protocolVersion && protocolVersion !== API.protocolVersion) {
-      res.status(400).json({ error: `Unsupported ${HEADER.protocolVersion} header` });
+    if (protocolVersion) {
+      const parsed = Number.parseInt(protocolVersion, 10);
+      if (!Number.isFinite(parsed)) {
+        res.status(400).json({ error: `Invalid ${HEADER.protocolVersion} header` });
+        return;
+      }
+      if (
+        parsed < compatibility.supportedProtocolVersions.min
+        || parsed > compatibility.supportedProtocolVersions.max
+      ) {
+        res.status(426).json({
+          error: `Unsupported ${HEADER.protocolVersion} header`,
+          compatibility,
+        });
+        return;
+      }
+    }
+
+    const extensionVersion = sanitizeString(req.headers['x-extension-version'], 64);
+    if (
+      extensionVersion
+      && compareVersions(extensionVersion, compatibility.minExtensionVersion) < 0
+    ) {
+      res.status(426).json({
+        error: 'Extension version too old',
+        compatibility,
+      });
       return;
     }
 
@@ -441,6 +574,7 @@ function createApiServer(options = {}) {
     const payload = body && typeof body === 'object' ? body : {};
     const mediaUrl = sanitizeString(payload.mediaUrl, 4096);
     const mediaType = sanitizeString(payload.mediaType, 16).toLowerCase();
+    const fallbackMediaUrl = sanitizeString(payload.fallbackMediaUrl, 4096);
 
     if (!isValidHttpUrl(mediaUrl)) {
       const err = new Error('mediaUrl must be a valid http/https URL');
@@ -450,6 +584,12 @@ function createApiServer(options = {}) {
 
     if (mediaType && mediaType !== 'hls' && mediaType !== 'file') {
       const err = new Error('mediaType must be one of: hls, file');
+      err.statusCode = 400;
+      throw err;
+    }
+
+    if (fallbackMediaUrl && !isValidHttpUrl(fallbackMediaUrl)) {
+      const err = new Error('fallbackMediaUrl must be a valid http/https URL');
       err.statusCode = 400;
       throw err;
     }
@@ -482,6 +622,7 @@ function createApiServer(options = {}) {
       resourceName: sanitizeString(payload.resourceName, 255),
       sourcePageUrl: sanitizeString(payload.sourcePageUrl, 4096),
       sourcePageTitle: sanitizeString(payload.sourcePageTitle, 255),
+      fallbackMediaUrl,
       headers: sanitizeHeaders(payload.headers),
       settings: {
         fileNaming,
@@ -512,10 +653,14 @@ function createApiServer(options = {}) {
   }
 
   app.get('/v1/health', (req, res) => {
+    const compatibility = getCompatibilityInfo();
     res.json({
       status: 'ok',
       appVersion,
       apiVersion: API.apiVersion,
+      protocolVersion: String(compatibility.protocolVersion),
+      supportedProtocolVersions: compatibility.supportedProtocolVersions,
+      minExtensionVersion: compatibility.minExtensionVersion,
       pairingRequired: authManager.isPairingRequired(),
       wsPath: '/ws',
     });
@@ -524,6 +669,17 @@ function createApiServer(options = {}) {
   app.post('/v1/pair/complete', (req, res) => {
     try {
       const payload = validatePairRequest(req.body || {});
+      const compatibility = getCompatibilityInfo();
+      if (
+        payload.extensionVersion
+        && compareVersions(payload.extensionVersion, compatibility.minExtensionVersion) < 0
+      ) {
+        res.status(426).json({
+          error: `Extension update required (min ${compatibility.minExtensionVersion})`,
+          compatibility,
+        });
+        return;
+      }
       const response = authManager.completePairing(payload);
       res.json(response);
     } catch (err) {
@@ -552,9 +708,22 @@ function createApiServer(options = {}) {
       fileNaming: body.settings.fileNaming,
       customName: body.settings.customName,
       maxSegmentAttempts: body.settings.maxSegmentAttempts,
+      fallbackMediaUrl: body.fallbackMediaUrl || '',
     };
 
     const threads = body.settings.threads;
+
+    const duplicate = findDuplicateQueuedJob(queue.url);
+    if (duplicate) {
+      res.json({
+        jobId: duplicate.id,
+        queuePosition: duplicate.queuePosition || 0,
+        status: duplicate.queueStatus || 'queued',
+        acceptedAt: new Date().toISOString(),
+        duplicate: true,
+      });
+      return;
+    }
 
     const { id, queuePosition } = enqueueLegacyRequest({ queue, threads, settings });
 
@@ -584,16 +753,90 @@ function createApiServer(options = {}) {
     res.json({ ok: true });
   });
 
-  // Temporary compatibility endpoints for legacy clients.
-  app.post('/api/queue/add', jobValidation, (req, res) => {
-    const { queue, threads, settings } = req.body || {};
-    if (!queue || !queue.url) {
-      res.status(400).json({ error: 'Missing queue.url in request body' });
+  app.post('/api/jobs/:id/retry-original-hls', (req, res) => {
+    const sourceJob = jobs.get(req.params.id);
+    if (!sourceJob) {
+      res.status(404).json({ error: 'Job not found' });
       return;
     }
 
+    if (!sourceJob.originalHlsUrl || !isValidHttpUrl(sourceJob.originalHlsUrl)) {
+      res.status(400).json({ error: 'Original HLS URL not available for retry' });
+      return;
+    }
+
+    const queue = {
+      url: sourceJob.originalHlsUrl,
+      title: sourceJob.title || 'HLS Retry',
+      name: sourceJob.title || 'HLS Retry',
+      headers: sourceJob.headers || {},
+      sourcePageUrl: sourceJob.sourcePageUrl || '',
+    };
+
+    const settings = {
+      fileNaming: 'title',
+      customName: '',
+      maxSegmentAttempts: sourceJob.maxSegmentAttempts === Infinity
+        ? 'infinite'
+        : String(sourceJob.maxSegmentAttempts || engineConfig.defaultMaxSegmentAttempts),
+      fallbackMediaUrl: sourceJob.fallbackUrl || '',
+    };
+
+    const threads = Number.isFinite(sourceJob.maxConcurrent) && sourceJob.maxConcurrent > 0
+      ? sourceJob.maxConcurrent
+      : engineConfig.defaultMaxConcurrent;
+
     const result = enqueueLegacyRequest({ queue, threads, settings });
-    res.json({ id: result.id, queuePosition: result.queuePosition });
+    res.json({
+      ...result,
+      retryOf: sourceJob.id,
+    });
+  });
+
+  app.post('/api/jobs/:id/retry', (req, res) => {
+    const sourceJob = jobs.get(req.params.id);
+    if (!sourceJob) {
+      res.status(404).json({ error: 'Job not found' });
+      return;
+    }
+
+    if (sourceJob.status === 'downloading' || sourceJob.status === 'fetching-playlist') {
+      res.status(400).json({ error: 'Cannot retry an active job' });
+      return;
+    }
+
+    const retryUrl = sanitizeString(sourceJob.url, 4096);
+    if (!isValidHttpUrl(retryUrl)) {
+      res.status(400).json({ error: 'Source job URL is invalid for retry' });
+      return;
+    }
+
+    const queue = {
+      url: retryUrl,
+      title: sourceJob.title || 'Retry Job',
+      name: sourceJob.title || 'Retry Job',
+      headers: sourceJob.headers || {},
+      sourcePageUrl: sourceJob.sourcePageUrl || '',
+    };
+
+    const settings = {
+      fileNaming: 'title',
+      customName: '',
+      maxSegmentAttempts: sourceJob.maxSegmentAttempts === Infinity
+        ? 'infinite'
+        : String(sourceJob.maxSegmentAttempts || engineConfig.defaultMaxSegmentAttempts),
+      fallbackMediaUrl: sourceJob.fallbackUrl || '',
+    };
+
+    const threads = Number.isFinite(sourceJob.maxConcurrent) && sourceJob.maxConcurrent > 0
+      ? sourceJob.maxConcurrent
+      : engineConfig.defaultMaxConcurrent;
+
+    const result = enqueueLegacyRequest({ queue, threads, settings });
+    res.json({
+      ...result,
+      retryOf: sourceJob.id,
+    });
   });
 
   registerHistoryRoutes(app, fsPromises, resolvedDownloadDir);

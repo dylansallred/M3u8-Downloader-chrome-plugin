@@ -34,7 +34,7 @@ const logger = winston.createLogger({
     winston.format.errors({ stack: true }),
     winston.format.json()
   ),
-  defaultMeta: { service: 'local-downloader' },
+  defaultMeta: { service: 'm3u8-downloader' },
   transports
 });
 

@@ -379,6 +379,10 @@ function registerJobRoutes(
       segmentStates: changedSegments, // Only send changed segments
       segmentStatesCount: changeCount, // For debugging
       error: job.error,
+      fallbackUrl: job.fallbackUrl || null,
+      originalHlsUrl: job.originalHlsUrl || null,
+      fallbackAttempted: !!job.fallbackAttempted,
+      fallbackUsed: !!job.fallbackUsed,
       thumbnailUrls: [...remoteThumbs, ...localThumbs],
       subtitlePath: job.subtitlePath || null,
       subtitleDownloadUrl,
