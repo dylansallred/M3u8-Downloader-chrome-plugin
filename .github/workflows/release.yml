@@ -68,8 +68,16 @@ jobs:
             echo "No DMG artifact found for notarization validation."
             exit 1
           fi
-          xcrun stapler staple "${DMG_FILE}"
-          xcrun stapler validate "${DMG_FILE}"
+          for attempt in 1 2 3 4 5; do
+            if xcrun stapler staple "${DMG_FILE}" && xcrun stapler validate "${DMG_FILE}"; then
+              echo "Staple/validate succeeded on attempt ${attempt}"
+              exit 0
+            fi
+            echo "Staple/validate failed on attempt ${attempt}, retrying in 30s..."
+            sleep 30
+          done
+          echo "Staple/validate failed after retries."
+          exit 1
 
   windows-desktop:
     name: Desktop Windows
