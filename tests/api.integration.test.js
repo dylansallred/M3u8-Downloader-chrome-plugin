@@ -517,6 +517,7 @@ test('hls job falls back to direct media URL when all segments fail', async () =
     assert.equal(fileRes.status, 200);
     const contentType = fileRes.headers.get('content-type') || '';
     assert.match(contentType, /^video\/(mp4|mp2t)/i);
+    await fileRes.arrayBuffer();
 
     const disableAutoStartRes = await apiFetch(baseUrl, '/api/queue/settings', {
       method: 'POST',
