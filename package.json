@@ -14,7 +14,9 @@
     "dist:desktop": "npm run dist --workspace @m3u8/desktop",
     "release:preflight": "./scripts/release-preflight.sh",
     "release:tag": "./scripts/release-tag.sh",
-    "package:extension": "cd apps/extension && zip -r ../../m3u8-extension.zip . -x \"*.DS_Store\"",
+    "build:extension:css": "npm run build:css --workspace @m3u8/extension",
+    "dev:extension:css": "npm run dev:css --workspace @m3u8/extension",
+    "package:extension": "npm run build:extension:css && cd apps/extension && zip -r ../../m3u8-extension.zip . -x '*.DS_Store' -x 'node_modules/*' -x 'src/*'",
     "lint": "echo 'No lint configured yet'",
     "test": "node --test --test-force-exit tests/api.integration.test.js",
     "test:e2e": "playwright test"

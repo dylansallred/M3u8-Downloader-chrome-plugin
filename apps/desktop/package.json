@@ -17,18 +17,31 @@
     "dist": "npm run build && electron-builder"
   },
   "dependencies": {
+    "@fontsource-variable/inter": "^5.2.8",
     "@m3u8/contracts": "1.0.0",
     "@m3u8/downloader-api": "1.0.0",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
     "electron-updater": "^6.3.9",
+    "lucide-react": "^0.575.0",
+    "next-themes": "^0.4.6",
+    "radix-ui": "^1.4.3",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "sonner": "^2.0.7",
+    "tailwind-merge": "^3.5.0"
   },
   "devDependencies": {
+    "@tailwindcss/vite": "^4.2.1",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.0.0",
     "concurrently": "^9.2.0",
     "cross-env": "^7.0.3",
     "electron": "40.6.1",
     "electron-builder": "^26.8.1",
+    "tailwindcss": "^4.2.1",
+    "typescript": "^5.9.3",
     "vite": "^7.3.1",
     "wait-on": "^8.0.1"
   },

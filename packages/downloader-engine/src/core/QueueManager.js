@@ -149,6 +149,7 @@ class QueueManager {
           tmdbId: job.tmdbId,
           tmdbTitle: job.tmdbTitle,
           tmdbReleaseDate: job.tmdbReleaseDate,
+          tmdbMetadata: job.tmdbMetadata || null,
           skipThumbnailGeneration: job.skipThumbnailGeneration,
           subtitlePath: job.subtitlePath,
           subtitleZipPath: job.subtitleZipPath,
@@ -222,6 +223,7 @@ class QueueManager {
       tmdbId: job.tmdbId,
       tmdbTitle: job.tmdbTitle,
       tmdbReleaseDate: job.tmdbReleaseDate,
+      tmdbMetadata: job.tmdbMetadata || null,
     }));
   }
 

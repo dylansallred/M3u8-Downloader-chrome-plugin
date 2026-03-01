@@ -217,6 +217,56 @@ async function remuxAndGenerateThumbnails(job, filePathFinal, {
           jobId: job.id,
           durationSeconds: duration,
         });
+
+        // Extract a single representative frame from the MP4.
+        // Seek to 10% into the video or 5 seconds (whichever is less) so we
+        // land past title cards but don't overshoot short clips.
+        const seekTime = duration > 0 ? Math.min(duration * 0.1, 5) : 1;
+        const thumbPath = path.join(downloadDir, `${job.id}-thumb.jpg`);
+
+        logger.info('Extracting thumbnail frame', {
+          jobId: job.id,
+          seekTime,
+          thumbPath,
+        });
+
+        await new Promise((resolve) => {
+          const ffThumb = spawn(FFMPEG_PATH, [
+            '-ss', String(seekTime),
+            '-i', mp4Path,
+            '-vframes', '1',
+            '-q:v', '4',
+            '-vf', 'scale=320:-2',
+            '-y',
+            thumbPath,
+          ], { stdio: 'ignore' });
+
+          ffThumb.on('error', (err) => {
+            logger.warn('ffmpeg thumbnail spawn error', {
+              jobId: job.id,
+              message: err && err.message,
+            });
+            resolve(); // Non-fatal: continue without thumbnail
+          });
+
+          ffThumb.on('exit', (code, signal) => {
+            if (code === 0) {
+              logger.info('Thumbnail extracted successfully', {
+                jobId: job.id,
+                thumbPath,
+                seekTime,
+              });
+              job.thumbnailPath = thumbPath;
+            } else {
+              logger.warn('ffmpeg thumbnail extraction exited with non-zero code', {
+                jobId: job.id,
+                code,
+                signal,
+              });
+            }
+            resolve(); // Non-fatal either way
+          });
+        });
       } else {
         const thumbnailCount = Array.isArray(job.thumbnailPaths) ? job.thumbnailPaths.length : 0;
         logger.info('Skipping MP4 thumbnail generation', {

@@ -21,6 +21,7 @@ const mediaList = document.getElementById('mediaList');
 const emptyState = document.getElementById('emptyState');
 const refreshButton = document.getElementById('refreshButton');
 const clearButton = document.getElementById('clearButton');
+const statusDot = document.getElementById('statusDot');
 
 let activeTab = null;
 let authToken = null;
@@ -30,7 +31,16 @@ let compatibilityIssue = null;
 
 function setStatus(text, isError = false) {
   connectionStatus.textContent = text;
-  connectionStatus.style.color = isError ? '#ff9b9b' : '#9fb0d8';
+  connectionStatus.style.color = isError ? 'var(--color-danger)' : 'var(--color-fg-muted)';
+
+  statusDot.className = 'status-dot';
+  if (isError) {
+    statusDot.classList.add('disconnected');
+  } else if (text.startsWith('Checking') || text.startsWith('Desktop app not')) {
+    statusDot.classList.add('checking');
+  } else {
+    statusDot.classList.add('connected');
+  }
 }
 
 function getToken() {
@@ -253,57 +263,234 @@ async function sendJob(item) {
   }
 }
 
+function tryDecodeBase64(str) {
+  try {
+    const cleaned = str.replace(/[~]/g, '/');
+    const decoded = atob(cleaned);
+    if (/^[\x20-\x7E]+$/.test(decoded)) return decoded;
+  } catch { /* not valid base64 */ }
+  return null;
+}
+
+function extractResolution(url) {
+  // Check for common resolution patterns in URL path
+  const plainMatch = url.match(/[\/_\-.](\d{3,4})[pP](?:[\/_\-.]|$)/);
+  if (plainMatch) return `${plainMatch[1]}p`;
+
+  // Try decoding base64 path segments that might contain resolution
+  try {
+    const pathSegments = new URL(url).pathname.split('/').filter(Boolean);
+    for (const seg of pathSegments) {
+      if (/^[A-Za-z0-9+/=]{2,8}$/.test(seg)) {
+        const decoded = tryDecodeBase64(seg);
+        if (decoded && /^\d{3,4}$/.test(decoded)) {
+          return `${decoded}p`;
+        }
+      }
+    }
+  } catch { /* ignore */ }
+
+  return null;
+}
+
+function getDisplayTitle(item) {
+  // Use page title if available (more meaningful than encoded filenames)
+  const pageTitle = activeTab && activeTab.title;
+
+  const filename = item.filename || '';
+
+  // Check if filename is base64-encoded
+  const nameWithoutExt = filename.replace(/\.[^.]+$/, '');
+  if (/^[A-Za-z0-9+/=~]{8,}$/.test(nameWithoutExt)) {
+    const decoded = tryDecodeBase64(nameWithoutExt);
+    if (decoded) {
+      // If decoded is generic (index, playlist, master), prefer page title
+      if (/^(index|playlist|master|chunklist|media)\b/i.test(decoded) && pageTitle) {
+        return pageTitle;
+      }
+      return decoded;
+    }
+  }
+
+  // If filename is generic, prefer page title
+  if (/^(index|playlist|master|media)\.(m3u8|mpd)$/i.test(filename) && pageTitle) {
+    return pageTitle;
+  }
+
+  return filename || pageTitle || 'Media';
+}
+
+function formatTimeAgo(timestamp) {
+  if (!timestamp) return '';
+  const seconds = Math.floor((Date.now() - timestamp) / 1000);
+  if (seconds < 5) return 'just now';
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours}h ago`;
+}
+
+function formatContentType(contentType) {
+  if (!contentType) return null;
+  const ct = contentType.split(';')[0].trim();
+  const friendly = {
+    'application/x-mpegurl': 'HLS Playlist',
+    'application/vnd.apple.mpegurl': 'HLS Playlist',
+    'application/dash+xml': 'DASH Manifest',
+    'video/mp4': 'MP4 Video',
+    'video/webm': 'WebM Video',
+    'video/mp2t': 'MPEG-TS',
+    'audio/mpeg': 'MP3 Audio',
+    'audio/mp4': 'M4A Audio',
+  };
+  return friendly[ct.toLowerCase()] || ct;
+}
+
+function formatSize(bytes) {
+  if (!bytes) return null;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${Math.round(bytes / (1024 * 1024))} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+}
+
+function getHostname(url) {
+  try { return new URL(url).hostname; } catch { return ''; }
+}
+
+function makeDot() {
+  const dot = document.createElement('span');
+  dot.className = 'text-fg-subtle text-[0.625rem]';
+  dot.textContent = '\u00B7';
+  return dot;
+}
+
 function renderMedia(items) {
   mediaList.innerHTML = '';
-  emptyState.style.display = items.length ? 'none' : 'block';
+  emptyState.style.display = items.length ? 'none' : 'flex';
 
   for (const item of items) {
     const wrapper = document.createElement('div');
-    wrapper.className = 'media-item';
+    wrapper.className = 'glass-subtle glass-glow p-3 animate-slide-up';
+
+    // Row 1: title + pills
+    const titleRow = document.createElement('div');
+    titleRow.className = 'flex items-start justify-between gap-2';
 
     const title = document.createElement('h3');
-    title.textContent = item.filename || item.type || 'Media';
+    title.className = 'text-[0.8125rem] font-medium text-fg truncate flex-1';
+    title.textContent = getDisplayTitle(item);
 
-    const meta = document.createElement('p');
-    const mb = item.contentLength ? `${Math.round(item.contentLength / (1024 * 1024))} MB` : 'size unknown';
-    meta.className = 'muted';
-    meta.textContent = `${(item.type || 'file').toUpperCase()} | ${mb}`;
+    const pillGroup = document.createElement('div');
+    pillGroup.className = 'flex items-center gap-1 flex-shrink-0';
+
+    const resolution = extractResolution(item.url);
+    if (resolution) {
+      const resPill = document.createElement('span');
+      resPill.className = 'pill pill-muted';
+      resPill.textContent = resolution;
+      pillGroup.appendChild(resPill);
+    }
+
+    const typePill = document.createElement('span');
+    typePill.className = 'pill pill-accent';
+    typePill.textContent = (item.type || 'file').toUpperCase();
+    pillGroup.appendChild(typePill);
+
+    titleRow.appendChild(title);
+    titleRow.appendChild(pillGroup);
+
+    // Row 2: domain + content type
+    const infoRow = document.createElement('div');
+    infoRow.className = 'flex items-center gap-1.5 mt-1.5 flex-wrap text-[0.6875rem] text-fg-muted';
+
+    const hostname = getHostname(item.url);
+    if (hostname) {
+      const domainEl = document.createElement('span');
+      domainEl.textContent = hostname;
+      infoRow.appendChild(domainEl);
+    }
+
+    const friendlyType = formatContentType(item.contentType);
+    if (friendlyType) {
+      if (hostname) infoRow.appendChild(makeDot());
+      const typeEl = document.createElement('span');
+      typeEl.textContent = friendlyType;
+      infoRow.appendChild(typeEl);
+    }
+
+    // Row 3: size + time + fallback
+    const metaRow = document.createElement('div');
+    metaRow.className = 'flex items-center gap-1.5 mt-1 flex-wrap text-[0.6875rem] text-fg-subtle';
+
+    const sizeText = formatSize(item.contentLength);
+    if (sizeText) {
+      const sizeEl = document.createElement('span');
+      sizeEl.textContent = sizeText;
+      metaRow.appendChild(sizeEl);
+    }
+
+    const timeText = formatTimeAgo(item.detectedAt);
+    if (timeText) {
+      if (sizeText) metaRow.appendChild(makeDot());
+      const timeEl = document.createElement('span');
+      timeEl.textContent = timeText;
+      metaRow.appendChild(timeEl);
+    }
 
     if (item.type === 'hls' && item.fallbackUrl) {
-      let fallbackHost = '';
-      try {
-        fallbackHost = new URL(item.fallbackUrl).hostname;
-      } catch {
-        fallbackHost = '';
-      }
-
+      const fallbackHost = getHostname(item.fallbackUrl);
+      if (sizeText || timeText) metaRow.appendChild(makeDot());
       const fallback = document.createElement('span');
-      fallback.className = 'fallback-pill';
+      fallback.className = 'pill pill-accent text-[0.625rem]';
       fallback.textContent = fallbackHost
         ? `Fallback: ${fallbackHost}`
         : 'Fallback available';
       fallback.title = item.fallbackUrl;
-      meta.appendChild(document.createTextNode(' | '));
-      meta.appendChild(fallback);
+      metaRow.appendChild(fallback);
     }
 
+    // Row 4: URL + copy button
+    const urlRow = document.createElement('div');
+    urlRow.className = 'url-row';
+
     const url = document.createElement('p');
-    url.className = 'media-url';
+    url.className = 'url-text';
     url.textContent = item.url;
 
-    const row = document.createElement('div');
-    row.className = 'row';
+    const copyBtn = document.createElement('button');
+    copyBtn.className = 'btn-copy';
+    copyBtn.title = 'Copy URL';
+    copyBtn.innerHTML = '<svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>';
+    copyBtn.addEventListener('click', () => {
+      navigator.clipboard.writeText(item.url).then(() => {
+        copyBtn.classList.add('copied');
+        copyBtn.innerHTML = '<svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>';
+        setTimeout(() => {
+          copyBtn.classList.remove('copied');
+          copyBtn.innerHTML = '<svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>';
+        }, 1500);
+      });
+    });
+
+    urlRow.appendChild(url);
+    urlRow.appendChild(copyBtn);
+
+    // Row 5: Action button
+    const actionRow = document.createElement('div');
+    actionRow.className = 'flex justify-end mt-2.5';
 
     const queueBtn = document.createElement('button');
-    queueBtn.className = 'primary';
-    queueBtn.textContent = 'Send to Desktop';
+    queueBtn.className = 'btn btn-primary text-xs';
+    queueBtn.innerHTML = '<svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg> Send to Desktop';
     queueBtn.addEventListener('click', () => sendJob(item));
 
-    row.appendChild(queueBtn);
-    wrapper.appendChild(title);
-    wrapper.appendChild(meta);
-    wrapper.appendChild(url);
-    wrapper.appendChild(row);
+    actionRow.appendChild(queueBtn);
+    wrapper.appendChild(titleRow);
+    wrapper.appendChild(infoRow);
+    wrapper.appendChild(metaRow);
+    wrapper.appendChild(urlRow);
+    wrapper.appendChild(actionRow);
     mediaList.appendChild(wrapper);
   }
 }
@@ -315,6 +502,7 @@ async function refreshMedia() {
 }
 
 async function refreshConnection() {
+  statusDot.className = 'status-dot checking';
   try {
     const data = await fetchHealth();
     updateCompatibilityState();
