@@ -1,12 +1,19 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 
 const NAV = [
-  { id: 'active', label: 'Active Download' },
   { id: 'queue', label: 'Queue' },
   { id: 'history', label: 'History' },
   { id: 'settings', label: 'Settings' },
-  { id: 'updates', label: 'Updates' },
 ];
+
+const QUEUE_STATUS_LABELS = {
+  queued: 'Queued',
+  downloading: 'Downloading',
+  paused: 'Paused',
+  completed: 'Completed',
+  failed: 'Failed',
+  cancelled: 'Cancelled',
+};
 
 function parseVersionParts(input) {
   return String(input || '')
@@ -60,8 +67,29 @@ function normalizeReleaseNotes(value) {
   return [];
 }
 
+function getQueueStatusLabel(status) {
+  return QUEUE_STATUS_LABELS[status] || String(status || 'unknown');
+}
+
+function getQueuePrimaryAction(job) {
+  if (!job?.id) return null;
+  if (job.queueStatus === 'queued') {
+    return { label: 'Start', endpoint: `/api/queue/${job.id}/start` };
+  }
+  if (job.queueStatus === 'downloading') {
+    return { label: 'Pause', endpoint: `/api/queue/${job.id}/pause` };
+  }
+  if (job.queueStatus === 'paused') {
+    return { label: 'Resume', endpoint: `/api/queue/${job.id}/resume` };
+  }
+  if (['failed', 'cancelled'].includes(job.queueStatus)) {
+    return { label: 'Retry', endpoint: `/api/jobs/${job.id}/retry` };
+  }
+  return null;
+}
+
 function App() {
-  const [currentView, setCurrentView] = useState('active');
+  const [currentView, setCurrentView] = useState('queue');
   const [appInfo, setAppInfo] = useState(null);
   const [status, setStatus] = useState('Initializing...');
   const [queueData, setQueueData] = useState({ queue: [], settings: {} });
@@ -113,6 +141,17 @@ function App() {
   });
   const activeSampleRef = useRef(null);
   const releaseNotes = useMemo(() => normalizeReleaseNotes(updater.releaseNotes), [updater.releaseNotes]);
+  const hasPairedExtensions = useMemo(() => Array.isArray(tokens) && tokens.length > 0, [tokens]);
+  const hasActivePairingCode = useMemo(() => {
+    if (!pairing?.expiresAt) return false;
+    const expiresAt = new Date(pairing.expiresAt).getTime();
+    if (!Number.isFinite(expiresAt)) return false;
+    return expiresAt > clockNow;
+  }, [pairing, clockNow]);
+  const showSidebarPairingButton = useMemo(
+    () => !hasPairedExtensions && !hasActivePairingCode,
+    [hasPairedExtensions, hasActivePairingCode],
+  );
 
   const apiBase = useMemo(() => appInfo?.apiBaseUrl || 'http://127.0.0.1:49732', [appInfo]);
   const outdatedTokenCount = useMemo(() => {
@@ -188,6 +227,24 @@ function App() {
       return title.includes(text) || id.includes(text);
     });
   }, [queueData.queue, queueFilterText, queueFilterStatus]);
+  const queueSummary = useMemo(() => {
+    const queue = Array.isArray(queueData.queue) ? queueData.queue : [];
+    const counts = queue.reduce((acc, job) => {
+      const key = String(job.queueStatus || 'unknown');
+      acc[key] = (acc[key] || 0) + 1;
+      return acc;
+    }, {});
+    return {
+      total: queue.length,
+      queued: counts.queued || 0,
+      downloading: counts.downloading || 0,
+      paused: counts.paused || 0,
+      completed: counts.completed || 0,
+      failed: counts.failed || 0,
+      cancelled: counts.cancelled || 0,
+    };
+  }, [queueData.queue]);
+  const activePrimaryAction = useMemo(() => getQueuePrimaryAction(activeJob), [activeJob]);
   const visibleHistoryItems = useMemo(() => {
     const text = String(historyFilterText || '').trim().toLowerCase();
     return (historyItems || []).filter((item) => {
@@ -352,6 +409,16 @@ function App() {
   }, []);
 
   useEffect(() => {
+    if (currentView === 'active') {
+      setCurrentView('queue');
+      return;
+    }
+    if (currentView === 'updates') {
+      setCurrentView('settings');
+    }
+  }, [currentView]);
+
+  useEffect(() => {
     if (!queueData.queue || queueData.queue.length === 0) {
       setActiveJobId(null);
       setActiveJob(null);
@@ -462,54 +529,6 @@ function App() {
       body: body ? JSON.stringify(body) : undefined,
     });
     await loadQueue();
-  };
-
-  const runBulkQueueAction = async (action) => {
-    const targets = (() => {
-      if (action === 'retry-failed') return visibleQueueRows.filter((job) => job.queueStatus === 'failed');
-      if (action === 'remove-cancelled') return visibleQueueRows.filter((job) => job.queueStatus === 'cancelled');
-      if (action === 'remove-completed') return visibleQueueRows.filter((job) => job.queueStatus === 'completed');
-      if (action === 'pause-visible') {
-        return visibleQueueRows.filter((job) => job.queueStatus === 'queued' || job.queueStatus === 'downloading');
-      }
-      if (action === 'resume-visible') return visibleQueueRows.filter((job) => job.queueStatus === 'paused');
-      if (action === 'start-visible') return visibleQueueRows.filter((job) => job.queueStatus === 'queued');
-      return [];
-    })();
-
-    if (targets.length === 0) {
-      setStatus('Bulk action skipped: no matching queue items.');
-      return;
-    }
-
-    const requests = targets.map((job) => {
-      const id = encodeURIComponent(job.id);
-      if (action === 'retry-failed') {
-        return request(`/api/jobs/${id}/retry`, { method: 'POST' });
-      }
-      if (action === 'remove-cancelled' || action === 'remove-completed') {
-        return request(`/api/queue/${id}`, { method: 'DELETE' });
-      }
-      if (action === 'pause-visible') {
-        return request(`/api/queue/${id}/pause`, { method: 'POST' });
-      }
-      if (action === 'resume-visible') {
-        return request(`/api/queue/${id}/resume`, { method: 'POST' });
-      }
-      if (action === 'start-visible') {
-        return request(`/api/queue/${id}/start`, { method: 'POST' });
-      }
-      return Promise.resolve();
-    });
-
-    const results = await Promise.allSettled(requests);
-    const failed = results.filter((r) => r.status === 'rejected').length;
-    await loadQueue();
-    if (failed > 0) {
-      setStatus(`Bulk action completed with ${failed} error(s).`);
-      return;
-    }
-    setStatus(`Bulk action completed (${targets.length} item(s)).`);
   };
 
   const saveDesktopSettings = async (nextSettings) => {
@@ -742,7 +761,9 @@ function App() {
       <aside className="sidebar">
         <h1>M3U8 Downloader</h1>
         <p className="muted">Electron Desktop</p>
-        <button className="pair-btn" onClick={generatePairingCode}>Generate Pairing Code</button>
+        {showSidebarPairingButton && (
+          <button className="pair-btn" onClick={generatePairingCode}>Generate Pairing Code</button>
+        )}
         <nav>
           {NAV.map((item) => (
             <button
@@ -767,130 +788,137 @@ function App() {
       </aside>
 
       <main className="content">
-        {currentView === 'active' && (
-          <section>
-            <h2>Active Download</h2>
-            {!activeJob && <p className="muted">No active job.</p>}
-            {activeJob && (
-              <div className="card">
-                <h3>{activeJob.title || activeJob.id}</h3>
-                <p>Status: <strong>{activeJob.status}</strong></p>
-                {activeJob.fallbackUsed && <p className="fallback-note">Fallback used: direct media URL</p>}
-                <p>Progress: <strong>{activeJob.progress || 0}%</strong></p>
-                <p>Segments: {activeJob.completedSegments || 0}/{activeJob.totalSegments || 0}</p>
-                <p>Downloaded: {Math.round((activeJob.bytesDownloaded || 0) / (1024 * 1024))} MB</p>
-                <p>Speed: <strong>{formatBytesPerSecond(activeMetrics.speedBps)}</strong></p>
-                <p>ETA: <strong>{formatEta(activeMetrics.etaSeconds)}</strong></p>
-                {activeJob.error && <p className="error">Reason: {activeJob.error}</p>}
-                <div className="row">
-                  <button onClick={() => callQueueAction(`/api/queue/${activeJob.id}/pause`)}>Pause</button>
-                  <button onClick={() => callQueueAction(`/api/queue/${activeJob.id}/resume`)}>Resume</button>
-                  <button className="danger" onClick={() => callQueueAction(`/api/jobs/${activeJob.id}/cancel`)}>Cancel</button>
-                  {activeJob.fallbackUsed && activeJob.originalHlsUrl && (
-                    <button onClick={() => callQueueAction(`/api/jobs/${activeJob.id}/retry-original-hls`)}>
-                      Retry Original HLS
-                    </button>
-                  )}
-                </div>
-              </div>
-            )}
-          </section>
-        )}
-
         {currentView === 'queue' && (
           <section>
-            <h2>Queue</h2>
-            <div className="row">
-              <button onClick={() => callQueueAction('/api/queue/start-all')}>Start All</button>
-              <button onClick={() => callQueueAction('/api/queue/pause-all')}>Pause All</button>
-              <button onClick={() => callQueueAction('/api/queue/clear-completed')}>Clear Completed</button>
+            <div className="card">
+              <h3>Current Download</h3>
+              {!activeJob && <p className="muted">No active download.</p>}
+              {activeJob && (
+                <>
+                  <p>{getQueueStatusLabel(activeJob.queueStatus || activeJob.status)} | {activeJob.progress || 0}%</p>
+                  {activeJob.fallbackUsed && <p className="fallback-note">Fallback used: direct media URL</p>}
+                  <p>Segments: {activeJob.completedSegments || 0}/{activeJob.totalSegments || 0}</p>
+                  <p>Downloaded: {Math.round((activeJob.bytesDownloaded || 0) / (1024 * 1024))} MB</p>
+                  <p>Speed: <strong>{formatBytesPerSecond(activeMetrics.speedBps)}</strong></p>
+                  <p>ETA: <strong>{formatEta(activeMetrics.etaSeconds)}</strong></p>
+                  {activeJob.error && <p className="error">Reason: {activeJob.error}</p>}
+                  <div className="row">
+                    {activePrimaryAction && (
+                      <button onClick={() => callQueueAction(activePrimaryAction.endpoint)}>
+                        {activePrimaryAction.label}
+                      </button>
+                    )}
+                    <button className="danger" onClick={() => callQueueAction(`/api/jobs/${activeJob.id}/cancel`)}>
+                      Cancel
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
-            <div className="row">
-              <button onClick={() => runBulkQueueAction('retry-failed')}>Retry Failed (Filtered)</button>
-              <button onClick={() => runBulkQueueAction('remove-cancelled')}>Remove Cancelled (Filtered)</button>
-              <button onClick={() => runBulkQueueAction('remove-completed')}>Remove Completed (Filtered)</button>
-              <button onClick={() => runBulkQueueAction('start-visible')}>Start Visible</button>
-              <button onClick={() => runBulkQueueAction('pause-visible')}>Pause Visible</button>
-              <button onClick={() => runBulkQueueAction('resume-visible')}>Resume Visible</button>
+
+            <div className="queue-header">
+              <h2>Queue</h2>
+              <div className="queue-main-actions">
+                <button onClick={() => callQueueAction('/api/queue/start-all')}>Start All</button>
+                <button onClick={() => callQueueAction('/api/queue/pause-all')}>Pause All</button>
+                <button onClick={() => callQueueAction('/api/queue/clear-completed')}>Clear Completed</button>
+              </div>
             </div>
-            <div className="row">
-              <label>
-                Search
-                <input
-                  type="text"
-                  value={queueFilterText}
-                  placeholder="Title or job id"
-                  onChange={(e) => setQueueFilterText(e.target.value)}
-                />
-              </label>
-              <label>
-                Status
-                <select
-                  value={queueFilterStatus}
-                  onChange={(e) => setQueueFilterStatus(e.target.value)}
-                >
-                  <option value="all">All</option>
-                  <option value="queued">Queued</option>
-                  <option value="downloading">Downloading</option>
-                  <option value="paused">Paused</option>
-                  <option value="completed">Completed</option>
-                  <option value="failed">Failed</option>
-                  <option value="cancelled">Cancelled</option>
-                </select>
-              </label>
+            <div className="queue-summary">
+              <span className="queue-chip">{queueSummary.total} total</span>
+              <span className="queue-chip">{queueSummary.downloading} downloading</span>
+              <span className="queue-chip">{queueSummary.queued} queued</span>
+              <span className="queue-chip">{queueSummary.paused} paused</span>
+              <span className="queue-chip">{queueSummary.failed} failed</span>
+              <span className="queue-chip">{queueSummary.completed} completed</span>
+              <span className="queue-chip">{queueSummary.cancelled} cancelled</span>
             </div>
-            <div className="row">
-              <label>
-                Max concurrent
-                <input
-                  type="number"
-                  min="1"
-                  max="16"
-                  value={queueData.settings?.maxConcurrent || 1}
-                  onChange={(e) => callQueueAction('/api/queue/settings', 'POST', {
-                    maxConcurrent: Number(e.target.value || 1),
-                    autoStart: queueData.settings?.autoStart !== false,
-                  })}
-                />
-              </label>
-              <label>
-                Auto start
-                <input
-                  type="checkbox"
-                  checked={queueData.settings?.autoStart !== false}
-                  onChange={(e) => callQueueAction('/api/queue/settings', 'POST', {
-                    maxConcurrent: queueData.settings?.maxConcurrent || 1,
-                    autoStart: e.target.checked,
-                  })}
-                />
-              </label>
+
+            <div className="card queue-controls">
+              <div className="queue-controls-grid">
+                <label>
+                  Search
+                  <input
+                    type="text"
+                    value={queueFilterText}
+                    placeholder="Title or job id"
+                    onChange={(e) => setQueueFilterText(e.target.value)}
+                  />
+                </label>
+                <label>
+                  Status
+                  <select
+                    value={queueFilterStatus}
+                    onChange={(e) => setQueueFilterStatus(e.target.value)}
+                  >
+                    <option value="all">All</option>
+                    <option value="queued">Queued</option>
+                    <option value="downloading">Downloading</option>
+                    <option value="paused">Paused</option>
+                    <option value="completed">Completed</option>
+                    <option value="failed">Failed</option>
+                    <option value="cancelled">Cancelled</option>
+                  </select>
+                </label>
+                <label>
+                  Max concurrent
+                  <input
+                    type="number"
+                    min="1"
+                    max="16"
+                    value={queueData.settings?.maxConcurrent || 1}
+                    onChange={(e) => callQueueAction('/api/queue/settings', 'POST', {
+                      maxConcurrent: Number(e.target.value || 1),
+                      autoStart: queueData.settings?.autoStart !== false,
+                    })}
+                  />
+                </label>
+                <label className="checkbox-field">
+                  Auto start
+                  <input
+                    type="checkbox"
+                    checked={queueData.settings?.autoStart !== false}
+                    onChange={(e) => callQueueAction('/api/queue/settings', 'POST', {
+                      maxConcurrent: queueData.settings?.maxConcurrent || 1,
+                      autoStart: e.target.checked,
+                    })}
+                  />
+                </label>
+              </div>
             </div>
             <div className="list">
-              {visibleQueueRows.length ? visibleQueueRows.map((job) => (
-                <article key={job.id} className="card">
-                  <h3>{job.title}</h3>
-                  <p>{job.queueStatus} | {job.progress || 0}%</p>
-                  {job.fallbackUsed && <p className="fallback-note">Fallback used</p>}
-                  {job.error && <p className="error">Reason: {job.error}</p>}
-                  <div className="row">
-                    <button onClick={() => setActiveJobId(job.id)}>Focus</button>
-                    <button onClick={() => callQueueAction(`/api/queue/${job.id}/start`)}>Start</button>
-                    <button onClick={() => callQueueAction(`/api/queue/${job.id}/pause`)}>Pause</button>
-                    <button onClick={() => callQueueAction(`/api/queue/${job.id}/resume`)}>Resume</button>
-                    <button className="danger" onClick={() => callQueueAction(`/api/queue/${job.id}`, 'DELETE')}>Remove</button>
-                    {['failed', 'cancelled', 'completed'].includes(job.queueStatus) && (
-                      <button onClick={() => callQueueAction(`/api/jobs/${job.id}/retry`)}>
-                        Retry Job
-                      </button>
-                    )}
-                    {job.fallbackUsed && job.originalHlsUrl && (
-                      <button onClick={() => callQueueAction(`/api/jobs/${job.id}/retry-original-hls`)}>
-                        Retry Original HLS
-                      </button>
-                    )}
-                  </div>
-                </article>
-              )) : <p className="muted">No queue items match current filter.</p>}
+              {visibleQueueRows.length ? visibleQueueRows.map((job) => {
+                const primaryAction = getQueuePrimaryAction(job);
+                return (
+                  <article key={job.id} className="card queue-card">
+                    <div className="queue-card-head">
+                      <h3>{job.title || job.id}</h3>
+                      <span className={`queue-pill ${job.queueStatus || 'unknown'}`}>
+                        {getQueueStatusLabel(job.queueStatus)}
+                      </span>
+                    </div>
+                    <p className="muted queue-meta">Progress {job.progress || 0}%</p>
+                    <div className="queue-progress" role="progressbar" aria-valuenow={job.progress || 0} aria-valuemin="0" aria-valuemax="100">
+                      <span style={{ width: `${Math.max(0, Math.min(100, Number(job.progress || 0)))}%` }} />
+                    </div>
+                    {job.fallbackUsed && <p className="fallback-note">Fallback used</p>}
+                    {job.error && <p className="error">Reason: {job.error}</p>}
+                    <div className="row">
+                      {primaryAction && (
+                        <button onClick={() => callQueueAction(primaryAction.endpoint)}>
+                          {primaryAction.label}
+                        </button>
+                      )}
+                      <button className="danger" onClick={() => callQueueAction(`/api/queue/${job.id}`, 'DELETE')}>Remove</button>
+                      {job.fallbackUsed && job.originalHlsUrl && ['failed', 'cancelled'].includes(job.queueStatus) && (
+                        <button onClick={() => callQueueAction(`/api/jobs/${job.id}/retry-original-hls`)}>
+                          Retry Original HLS
+                        </button>
+                      )}
+                    </div>
+                  </article>
+                );
+              }) : <p className="muted">No queue items match current filter.</p>}
             </div>
           </section>
         )}
@@ -973,6 +1001,43 @@ function App() {
                   onChange={(e) => saveDesktopSettings({ queueAutoStart: e.target.checked })}
                 />
               </label>
+            </div>
+
+            <div className="card">
+              <h3>Updates</h3>
+              <p>Phase: <strong>{updater.phase}</strong></p>
+              <p>{updater.message}</p>
+              <p>Progress: {updater.progress || 0}%</p>
+              {updater.deferredUntil && (
+                <p className="muted">Deferred until: {new Date(updater.deferredUntil).toLocaleString()}</p>
+              )}
+              {updater.nextReminderAt && (
+                <p className="muted">Next reminder: {new Date(updater.nextReminderAt).toLocaleString()}</p>
+              )}
+              {releaseNotes.length > 0 && (
+                <div className="release-notes">
+                  <h4>Release Notes</h4>
+                  {releaseNotes.map((note, idx) => (
+                    <p key={idx} className="muted">{note}</p>
+                  ))}
+                </div>
+              )}
+              {updater.error && <p className="error">Error: {updater.error}</p>}
+              <div className="row">
+                <button onClick={() => window.desktop.checkForUpdates()}>Check for Updates</button>
+                <button
+                  disabled={updater.phase !== 'downloaded'}
+                  onClick={() => window.desktop.installUpdateNow()}
+                >
+                  Restart and Install
+                </button>
+                <button
+                  disabled={updater.phase !== 'downloaded'}
+                  onClick={() => window.desktop.remindLater(30)}
+                >
+                  Later (30m)
+                </button>
+              </div>
             </div>
 
             <div className="card">
@@ -1133,46 +1198,6 @@ function App() {
           </section>
         )}
 
-        {currentView === 'updates' && (
-          <section>
-            <h2>Updates</h2>
-            <div className="card">
-              <p>Phase: <strong>{updater.phase}</strong></p>
-              <p>{updater.message}</p>
-              <p>Progress: {updater.progress || 0}%</p>
-              {updater.deferredUntil && (
-                <p className="muted">Deferred until: {new Date(updater.deferredUntil).toLocaleString()}</p>
-              )}
-              {updater.nextReminderAt && (
-                <p className="muted">Next reminder: {new Date(updater.nextReminderAt).toLocaleString()}</p>
-              )}
-              {releaseNotes.length > 0 && (
-                <div className="release-notes">
-                  <h4>Release Notes</h4>
-                  {releaseNotes.map((note, idx) => (
-                    <p key={idx} className="muted">{note}</p>
-                  ))}
-                </div>
-              )}
-              {updater.error && <p className="error">Error: {updater.error}</p>}
-              <div className="row">
-                <button onClick={() => window.desktop.checkForUpdates()}>Check for Updates</button>
-                <button
-                  disabled={updater.phase !== 'downloaded'}
-                  onClick={() => window.desktop.installUpdateNow()}
-                >
-                  Restart and Install
-                </button>
-                <button
-                  disabled={updater.phase !== 'downloaded'}
-                  onClick={() => window.desktop.remindLater(30)}
-                >
-                  Later (30m)
-                </button>
-              </div>
-            </div>
-          </section>
-        )}
       </main>
     </div>
   );
