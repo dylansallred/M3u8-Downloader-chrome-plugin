@@ -71,6 +71,40 @@ async function startMediaFixtureServer() {
   };
 }
 
+async function startCompatibilityFixtureServer() {
+  const port = await getFreePort();
+  const server = http.createServer((req, res) => {
+    if (req.url === '/v1/health') {
+      const body = JSON.stringify({
+        status: 'ok',
+        appVersion: 'e2e-test',
+        apiVersion: '1',
+        protocolVersion: '1',
+        supportedProtocolVersions: { min: 1, max: 1 },
+        minExtensionVersion: '99.0.0',
+        pairingRequired: true,
+        wsPath: '/ws',
+      });
+      res.writeHead(200, {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(body),
+      });
+      res.end(body);
+      return;
+    }
+
+    res.writeHead(404, { 'Content-Type': 'text/plain' });
+    res.end('Not found');
+  });
+
+  await new Promise((resolve) => server.listen(port, '127.0.0.1', resolve));
+
+  return {
+    baseUrl: `http://127.0.0.1:${port}`,
+    close: () => new Promise((resolve, reject) => server.close((err) => (err ? reject(err) : resolve()))),
+  };
+}
+
 async function waitForJobQueued(baseUrl, timeoutMs = 10_000) {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
@@ -349,6 +383,22 @@ test('extension shows pairing failure for expired pairing code', async () => {
     await expect(popupPage.locator('#pairingResult')).toContainText('No valid pairing code. Generate a new code in desktop settings.');
     await expect(popupPage.locator('#pairingCard')).toBeVisible();
   });
+});
+
+test('extension blocks pairing and enqueue when app requires newer extension version', async () => {
+  test.skip(process.platform === 'win32', 'Extension automation is validated in CI on Linux runner');
+
+  const compatibilityServer = await startCompatibilityFixtureServer();
+
+  try {
+    await withExtensionOnly(compatibilityServer.baseUrl, async ({ popupPage }) => {
+      await expect(popupPage.locator('#connectionStatus')).toContainText('update required');
+      await expect(popupPage.locator('#pairingResult')).toContainText('too old');
+      await expect(popupPage.locator('#pairButton')).toBeDisabled();
+    });
+  } finally {
+    await compatibilityServer.close();
+  }
 });
 
 test('extension recovers after local desktop API restarts and can enqueue again', async () => {

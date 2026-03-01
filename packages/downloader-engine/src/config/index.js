@@ -1,4 +1,4 @@
-// Centralized configuration for the local-downloader server.
+// Centralized configuration for the m3u8-downloader server.
 // Keeps default values aligned with previous hard-coded settings.
 
 const DEFAULT_PORT = process.env.PORT || 3000;

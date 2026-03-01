@@ -75,6 +75,26 @@ async function startFixtureMediaServer() {
       return;
     }
 
+    if (req.url === '/broken.m3u8') {
+      const base = `http://127.0.0.1:${port}`;
+      const playlist = [
+        '#EXTM3U',
+        '#EXT-X-VERSION:3',
+        '#EXT-X-TARGETDURATION:3',
+        '#EXTINF:3,',
+        `${base}/missing-seg.ts`,
+        '#EXT-X-ENDLIST',
+        '',
+      ].join('\n');
+
+      res.writeHead(200, {
+        'Content-Type': 'application/vnd.apple.mpegurl',
+        'Content-Length': Buffer.byteLength(playlist),
+      });
+      res.end(playlist);
+      return;
+    }
+
     if (req.url === '/seg-1.ts' || req.url === '/seg-2.ts') {
       const body = Buffer.alloc(64 * 1024, 2);
       res.writeHead(200, {
@@ -82,6 +102,12 @@ async function startFixtureMediaServer() {
         'Content-Length': body.length,
       });
       res.end(body);
+      return;
+    }
+
+    if (req.url === '/missing-seg.ts') {
+      res.writeHead(404, { 'Content-Type': 'text/plain' });
+      res.end('Missing segment');
       return;
     }
 
@@ -97,12 +123,19 @@ async function startFixtureMediaServer() {
   };
 }
 
-async function apiFetch(baseUrl, pathName, { method = 'GET', body, token, includeV1Headers = true } = {}) {
+async function apiFetch(baseUrl, pathName, {
+  method = 'GET',
+  body,
+  token,
+  includeV1Headers = true,
+  extraHeaders = {},
+} = {}) {
   const headers = { 'Content-Type': 'application/json' };
   if (includeV1Headers) {
     headers['X-Client'] = 'fetchv-extension';
     headers['X-Protocol-Version'] = '1';
   }
+  Object.assign(headers, extraHeaders || {});
   if (token) {
     headers.Authorization = `Bearer ${token}`;
   }
@@ -191,12 +224,32 @@ test('v1 health, pairing, auth, validation, queue lifecycle, and restart recover
     const healthRes = await apiFetch(baseUrl, '/v1/health');
     assert.equal(healthRes.status, 200);
     assert.equal(healthRes.data.pairingRequired, true);
+    assert.equal(typeof healthRes.data.protocolVersion, 'string');
+    assert.ok(healthRes.data.supportedProtocolVersions);
+    assert.equal(typeof healthRes.data.minExtensionVersion, 'string');
+
+    const badProtocolRes = await apiFetch(baseUrl, '/v1/health', {
+      extraHeaders: { 'X-Protocol-Version': '999' },
+    });
+    assert.equal(badProtocolRes.status, 426);
 
     const badPairRes = await apiFetch(baseUrl, '/v1/pair/complete', {
       method: 'POST',
       body: { pairingCode: 'ABC12345' },
     });
     assert.equal(badPairRes.status, 400);
+
+    const oldPairing = apiServer.authManager.generatePairingCode();
+    const oldPairRes = await apiFetch(baseUrl, '/v1/pair/complete', {
+      method: 'POST',
+      body: {
+        pairingCode: oldPairing.code,
+        extensionId: 'test-extension-id',
+        extensionVersion: '0.0.1',
+        browser: 'chrome',
+      },
+    });
+    assert.equal(oldPairRes.status, 426);
 
     const token = await issueToken(apiServer, baseUrl);
 
@@ -220,6 +273,22 @@ test('v1 health, pairing, auth, validation, queue lifecycle, and restart recover
       body: { maxConcurrent: 1, autoStart: false },
     });
     assert.equal(queueSettingsRes.status, 200);
+
+    const blockedDesktopApiFromExtensionRes = await apiFetch(baseUrl, '/api/queue', {
+      method: 'GET',
+      includeV1Headers: true,
+      extraHeaders: { Origin: 'chrome-extension://test-extension-id' },
+    });
+    assert.equal(blockedDesktopApiFromExtensionRes.status, 403);
+
+    const removedLegacyAddRes = await apiFetch(baseUrl, '/api/queue/add', {
+      method: 'POST',
+      includeV1Headers: false,
+      body: {
+        queue: { url: `${mediaServer.baseUrl}/sample.mp4`, title: 'legacy' },
+      },
+    });
+    assert.equal(removedLegacyAddRes.status, 404);
 
     const createHlsRes = await apiFetch(baseUrl, '/v1/jobs', {
       method: 'POST',
@@ -269,6 +338,19 @@ test('v1 health, pairing, auth, validation, queue lifecycle, and restart recover
     assert.equal(createDirectRes.status, 200);
 
     const directJobId = createDirectRes.data.jobId;
+
+    const duplicateDirectRes = await apiFetch(baseUrl, '/v1/jobs', {
+      method: 'POST',
+      token,
+      body: {
+        mediaUrl: `${mediaServer.baseUrl}/sample.mp4`,
+        mediaType: 'file',
+        title: 'Direct File Job Duplicate',
+      },
+    });
+    assert.equal(duplicateDirectRes.status, 200);
+    assert.equal(duplicateDirectRes.data.duplicate, true);
+    assert.equal(duplicateDirectRes.data.jobId, directJobId);
 
     await apiFetch(baseUrl, '/api/queue/settings', {
       method: 'POST',
@@ -380,6 +462,65 @@ test('cancel endpoint stops an active job', async () => {
       }
       return false;
     }, { timeoutMs: 7000, intervalMs: 150 });
+  } finally {
+    await mediaServer.close();
+    await apiServer.stop();
+  }
+});
+
+test('hls job falls back to direct media URL when all segments fail', async () => {
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'm3u8-tests-fallback-'));
+  const port = await getFreePort();
+  const baseUrl = `http://127.0.0.1:${port}`;
+
+  const mediaServer = await startFixtureMediaServer();
+  const apiServer = await startApi({ dataDir: tmpRoot, port });
+
+  try {
+    const token = await issueToken(apiServer, baseUrl);
+
+    const createRes = await apiFetch(baseUrl, '/v1/jobs', {
+      method: 'POST',
+      token,
+      body: {
+        mediaUrl: `${mediaServer.baseUrl}/broken.m3u8`,
+        mediaType: 'hls',
+        fallbackMediaUrl: `${mediaServer.baseUrl}/sample.mp4`,
+        title: 'Fallback Job',
+      },
+    });
+    assert.equal(createRes.status, 200);
+
+    const jobId = createRes.data.jobId;
+    await waitForJobQueueState(baseUrl, jobId, 'completed', { timeoutMs: 12000, intervalMs: 200 });
+
+    const jobRes = await apiFetch(baseUrl, `/api/jobs/${jobId}`, { includeV1Headers: false });
+    assert.equal(jobRes.status, 200);
+    assert.equal(jobRes.data.status, 'completed');
+    assert.equal(jobRes.data.progress, 100);
+    assert.equal(jobRes.data.fallbackAttempted, true);
+    assert.equal(jobRes.data.fallbackUsed, true);
+
+    const fileRes = await fetch(`${baseUrl}/api/jobs/${jobId}/file`);
+    assert.equal(fileRes.status, 200);
+    const contentType = fileRes.headers.get('content-type') || '';
+    assert.match(contentType, /^video\/(mp4|mp2t)/i);
+
+    const retryRes = await apiFetch(baseUrl, `/api/jobs/${jobId}/retry-original-hls`, {
+      method: 'POST',
+      includeV1Headers: false,
+    });
+    assert.equal(retryRes.status, 200);
+    assert.equal(retryRes.data.retryOf, jobId);
+    assert.ok(retryRes.data.id);
+
+    const retryGenericRes = await apiFetch(baseUrl, `/api/jobs/${jobId}/retry`, {
+      method: 'POST',
+      includeV1Headers: false,
+    });
+    assert.equal(retryGenericRes.status, 200);
+    assert.equal(retryGenericRes.data.retryOf, jobId);
+    assert.ok(retryGenericRes.data.id);
   } finally {
     await mediaServer.close();
     await apiServer.stop();

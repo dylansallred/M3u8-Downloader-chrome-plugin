@@ -3,6 +3,9 @@ const API = {
   port: 49732,
   apiVersion: '1',
   protocolVersion: '1',
+  minProtocolVersion: '1',
+  maxProtocolVersion: '1',
+  minExtensionVersion: '1.0.0',
 };
 
 const HEADER = {

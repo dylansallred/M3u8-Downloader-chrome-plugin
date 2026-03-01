@@ -8,6 +8,7 @@ const { API } = require('@m3u8/contracts');
 let mainWindow = null;
 let apiServer = null;
 let updaterTimer = null;
+let updaterReminderTimer = null;
 const apiHost = process.env.M3U8_API_HOST || API.host;
 const apiPort = Number(process.env.M3U8_API_PORT || API.port);
 
@@ -16,6 +17,10 @@ const updaterState = {
   message: 'Idle',
   progress: 0,
   updateInfo: null,
+  releaseNotes: [],
+  deferredUntil: null,
+  nextReminderAt: null,
+  reminderIntervalMs: null,
   lastCheckedAt: null,
   error: null,
 };
@@ -57,10 +62,121 @@ function writeSettings(next) {
   return merged;
 }
 
+function buildDiagnosticsFilePath() {
+  const now = new Date();
+  const stamp = now
+    .toISOString()
+    .replace(/[:]/g, '-')
+    .replace(/\..+$/, '')
+    .replace('T', '_');
+  const diagnosticsDir = path.join(app.getPath('userData'), 'diagnostics');
+  fs.mkdirSync(diagnosticsDir, { recursive: true });
+  return path.join(diagnosticsDir, `diagnostics-${stamp}.json`);
+}
+
+function getDiagnosticsDirPath() {
+  const diagnosticsDir = path.join(app.getPath('userData'), 'diagnostics');
+  fs.mkdirSync(diagnosticsDir, { recursive: true });
+  return diagnosticsDir;
+}
+
+function getDownloadDirPath() {
+  const dataDir = path.join(app.getPath('userData'), 'data');
+  const downloadDir = path.join(dataDir, 'downloads');
+  fs.mkdirSync(downloadDir, { recursive: true });
+  return downloadDir;
+}
+
+function buildSupportBundleDirPath() {
+  const now = new Date();
+  const stamp = now
+    .toISOString()
+    .replace(/[:]/g, '-')
+    .replace(/\..+$/, '')
+    .replace('T', '_');
+  const bundlesDir = path.join(app.getPath('userData'), 'support-bundles');
+  const bundleDir = path.join(bundlesDir, `support-bundle-${stamp}`);
+  fs.mkdirSync(bundleDir, { recursive: true });
+  return bundleDir;
+}
+
+function safeReadJson(filePath, fallback = null) {
+  try {
+    if (!fs.existsSync(filePath)) return fallback;
+    const raw = fs.readFileSync(filePath, 'utf8');
+    return JSON.parse(raw);
+  } catch {
+    return fallback;
+  }
+}
+
+function copyPathIfExists(sourcePath, destPath) {
+  if (!fs.existsSync(sourcePath)) return false;
+  const stat = fs.statSync(sourcePath);
+  if (stat.isDirectory()) {
+    fs.cpSync(sourcePath, destPath, { recursive: true });
+    return true;
+  }
+  fs.mkdirSync(path.dirname(destPath), { recursive: true });
+  fs.copyFileSync(sourcePath, destPath);
+  return true;
+}
+
 function sendToRenderer(channel, payload) {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send(channel, payload);
   }
+}
+
+function clearUpdaterReminderTimer() {
+  if (updaterReminderTimer) {
+    clearTimeout(updaterReminderTimer);
+    updaterReminderTimer = null;
+  }
+}
+
+function normalizeReleaseNotes(updateInfo) {
+  const source = updateInfo?.releaseNotes;
+  if (!source) return [];
+  if (typeof source === 'string') {
+    return source.trim() ? [source.trim()] : [];
+  }
+  if (Array.isArray(source)) {
+    return source
+      .map((entry) => {
+        if (typeof entry === 'string') return entry.trim();
+        if (entry && typeof entry.note === 'string') return entry.note.trim();
+        return '';
+      })
+      .filter(Boolean);
+  }
+  return [];
+}
+
+function scheduleUpdaterReminder(delayMs, intervalMs) {
+  clearUpdaterReminderTimer();
+  const safeDelay = Math.max(5_000, Number(delayMs) || 0);
+  const safeInterval = Math.max(5 * 60 * 1000, Number(intervalMs) || 30 * 60 * 1000);
+  updaterState.reminderIntervalMs = safeInterval;
+  updaterState.nextReminderAt = Date.now() + safeDelay;
+  sendToRenderer('updater:event', updaterState);
+
+  updaterReminderTimer = setTimeout(() => {
+    updaterReminderTimer = null;
+    if (updaterState.phase !== 'downloaded') {
+      updaterState.nextReminderAt = null;
+      updaterState.deferredUntil = null;
+      sendToRenderer('updater:event', updaterState);
+      return;
+    }
+
+    const version = updaterState.updateInfo?.version || 'new';
+    updaterState.message = `Reminder: Update ${version} is ready. Restart to install.`;
+    updaterState.deferredUntil = null;
+    sendToRenderer('updater:event', updaterState);
+
+    scheduleUpdaterReminder(safeInterval, safeInterval);
+  }, safeDelay);
 }
 
 function configureAutoUpdater() {
@@ -68,26 +184,40 @@ function configureAutoUpdater() {
   autoUpdater.autoInstallOnAppQuit = false;
 
   autoUpdater.on('checking-for-update', () => {
+    clearUpdaterReminderTimer();
     updaterState.phase = 'checking';
     updaterState.message = 'Checking for updates...';
+    updaterState.deferredUntil = null;
+    updaterState.nextReminderAt = null;
+    updaterState.reminderIntervalMs = null;
     updaterState.lastCheckedAt = Date.now();
     updaterState.error = null;
     sendToRenderer('updater:event', updaterState);
   });
 
   autoUpdater.on('update-available', (info) => {
+    clearUpdaterReminderTimer();
     updaterState.phase = 'downloading';
     updaterState.message = `Downloading version ${info.version}...`;
     updaterState.updateInfo = info;
+    updaterState.releaseNotes = normalizeReleaseNotes(info);
+    updaterState.deferredUntil = null;
+    updaterState.nextReminderAt = null;
+    updaterState.reminderIntervalMs = null;
     updaterState.error = null;
     sendToRenderer('updater:event', updaterState);
   });
 
   autoUpdater.on('update-not-available', (info) => {
+    clearUpdaterReminderTimer();
     updaterState.phase = 'idle';
     updaterState.message = 'You are up to date.';
     updaterState.updateInfo = info || null;
+    updaterState.releaseNotes = normalizeReleaseNotes(info);
     updaterState.progress = 0;
+    updaterState.deferredUntil = null;
+    updaterState.nextReminderAt = null;
+    updaterState.reminderIntervalMs = null;
     updaterState.error = null;
     sendToRenderer('updater:event', updaterState);
   });
@@ -101,17 +231,26 @@ function configureAutoUpdater() {
   });
 
   autoUpdater.on('update-downloaded', (info) => {
+    clearUpdaterReminderTimer();
     updaterState.phase = 'downloaded';
     updaterState.message = `Update ${info.version} downloaded. Restart to install.`;
     updaterState.updateInfo = info;
+    updaterState.releaseNotes = normalizeReleaseNotes(info);
     updaterState.progress = 100;
+    updaterState.deferredUntil = null;
+    updaterState.nextReminderAt = null;
+    updaterState.reminderIntervalMs = null;
     updaterState.error = null;
     sendToRenderer('updater:event', updaterState);
   });
 
   autoUpdater.on('error', (error) => {
+    clearUpdaterReminderTimer();
     updaterState.phase = 'error';
     updaterState.message = 'Update check failed';
+    updaterState.deferredUntil = null;
+    updaterState.nextReminderAt = null;
+    updaterState.reminderIntervalMs = null;
     updaterState.error = error ? String(error.message || error) : 'Unknown updater error';
     sendToRenderer('updater:event', updaterState);
   });
@@ -201,6 +340,151 @@ function registerIpc() {
     return merged;
   });
 
+  ipcMain.handle('app:save-diagnostics-file', async (event, payload) => {
+    try {
+      const filePath = buildDiagnosticsFilePath();
+      fs.writeFileSync(filePath, JSON.stringify(payload || {}, null, 2), 'utf8');
+      return { ok: true, filePath };
+    } catch (err) {
+      return { ok: false, error: String(err.message || err) };
+    }
+  });
+
+  ipcMain.handle('app:open-diagnostics-folder', async () => {
+    try {
+      const folderPath = getDiagnosticsDirPath();
+      const openResult = await shell.openPath(folderPath);
+      if (openResult) {
+        return { ok: false, error: openResult, folderPath };
+      }
+      return { ok: true, folderPath };
+    } catch (err) {
+      return { ok: false, error: String(err.message || err) };
+    }
+  });
+
+  ipcMain.handle('app:open-history-file', async (event, fileName) => {
+    try {
+      const safeName = path.basename(String(fileName || ''));
+      if (!safeName) {
+        return { ok: false, error: 'Missing file name' };
+      }
+      const filePath = path.join(getDownloadDirPath(), safeName);
+      if (!fs.existsSync(filePath)) {
+        return { ok: false, error: 'File not found' };
+      }
+      const openResult = await shell.openPath(filePath);
+      if (openResult) {
+        return { ok: false, error: openResult, filePath };
+      }
+      return { ok: true, filePath };
+    } catch (err) {
+      return { ok: false, error: String(err.message || err) };
+    }
+  });
+
+  ipcMain.handle('app:open-history-folder', async (event, fileName) => {
+    try {
+      const safeName = path.basename(String(fileName || ''));
+      if (!safeName) {
+        return { ok: false, error: 'Missing file name' };
+      }
+      const filePath = path.join(getDownloadDirPath(), safeName);
+      if (!fs.existsSync(filePath)) {
+        return { ok: false, error: 'File not found' };
+      }
+      shell.showItemInFolder(filePath);
+      return { ok: true, filePath, folderPath: path.dirname(filePath) };
+    } catch (err) {
+      return { ok: false, error: String(err.message || err) };
+    }
+  });
+
+  ipcMain.handle('app:export-support-bundle', async (event, payload) => {
+    try {
+      const userDataDir = app.getPath('userData');
+      const dataDir = path.join(userDataDir, 'data');
+      const downloadDir = path.join(dataDir, 'downloads');
+      const queueFile = path.join(downloadDir, 'queue.json');
+      const authFile = path.join(dataDir, 'auth.json');
+      const settingsFile = appSettingsPath();
+
+      const bundleDir = buildSupportBundleDirPath();
+      const included = [];
+
+      const diagnosticsPath = path.join(bundleDir, 'diagnostics.json');
+      fs.writeFileSync(diagnosticsPath, JSON.stringify(payload || {}, null, 2), 'utf8');
+      included.push('diagnostics.json');
+
+      const settingsSnapshotPath = path.join(bundleDir, 'settings.snapshot.json');
+      fs.writeFileSync(settingsSnapshotPath, JSON.stringify(readSettings(), null, 2), 'utf8');
+      included.push('settings.snapshot.json');
+
+      const queueSnapshotPath = path.join(bundleDir, 'queue.snapshot.json');
+      fs.writeFileSync(
+        queueSnapshotPath,
+        JSON.stringify(safeReadJson(queueFile, { queue: [], settings: {} }), null, 2),
+        'utf8',
+      );
+      included.push('queue.snapshot.json');
+
+      const authSnapshotPath = path.join(bundleDir, 'auth.snapshot.json');
+      fs.writeFileSync(
+        authSnapshotPath,
+        JSON.stringify(safeReadJson(authFile, { pairing: null, tokens: [] }), null, 2),
+        'utf8',
+      );
+      included.push('auth.snapshot.json');
+
+      const metaPath = path.join(bundleDir, 'bundle.meta.json');
+      fs.writeFileSync(metaPath, JSON.stringify({
+        exportedAt: new Date().toISOString(),
+        appVersion: app.getVersion(),
+        apiBaseUrl: `http://${apiHost}:${apiPort}`,
+        userDataDir,
+      }, null, 2), 'utf8');
+      included.push('bundle.meta.json');
+
+      const logsDirInBundle = path.join(bundleDir, 'logs');
+      const logCandidates = [
+        path.join(userDataDir, 'logs'),
+        path.join(dataDir, 'logs'),
+        path.join(downloadDir, 'logs'),
+        path.join(downloadDir, 'app.log'),
+        path.join(downloadDir, 'download.log'),
+        path.join(downloadDir, 'updater.log'),
+      ];
+
+      let copiedLogs = 0;
+      for (const candidate of logCandidates) {
+        const baseName = path.basename(candidate);
+        const target = path.join(logsDirInBundle, baseName);
+        try {
+          if (copyPathIfExists(candidate, target)) {
+            copiedLogs += 1;
+          }
+        } catch {
+          // Continue copying the rest of available logs.
+        }
+      }
+      if (copiedLogs > 0) {
+        included.push('logs/');
+      }
+
+      // Keep original raw files when available for easier support diffing.
+      if (copyPathIfExists(settingsFile, path.join(bundleDir, 'settings.raw.json'))) {
+        included.push('settings.raw.json');
+      }
+      if (copyPathIfExists(queueFile, path.join(bundleDir, 'queue.raw.json'))) {
+        included.push('queue.raw.json');
+      }
+
+      return { ok: true, bundlePath: bundleDir, included };
+    } catch (err) {
+      return { ok: false, error: String(err.message || err) };
+    }
+  });
+
   ipcMain.handle('auth:generate-pairing-code', async () => {
     if (!apiServer) {
       throw new Error('API server not started');
@@ -228,8 +512,20 @@ function registerIpc() {
   ipcMain.handle('updater:check-now', async () => checkForUpdatesNow());
 
   ipcMain.handle('updater:install-now', async () => {
+    clearUpdaterReminderTimer();
     autoUpdater.quitAndInstall(false, true);
     return { ok: true };
+  });
+
+  ipcMain.handle('updater:remind-later', async (event, minutes = 30) => {
+    if (updaterState.phase !== 'downloaded') {
+      return { ok: false, error: 'No downloaded update to defer' };
+    }
+    const delayMs = Math.max(1, Number(minutes) || 30) * 60 * 1000;
+    updaterState.deferredUntil = Date.now() + delayMs;
+    updaterState.message = `Update deferred until ${new Date(updaterState.deferredUntil).toLocaleString()}`;
+    scheduleUpdaterReminder(delayMs, delayMs);
+    return { ok: true, deferredUntil: updaterState.deferredUntil };
   });
 }
 
@@ -282,6 +578,7 @@ app.on('before-quit', async () => {
     clearInterval(updaterTimer);
     updaterTimer = null;
   }
+  clearUpdaterReminderTimer();
 
   if (apiServer) {
     try {

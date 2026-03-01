@@ -105,6 +105,16 @@ button.danger {
   margin-top: 6px;
 }
 
+.fallback-pill {
+  display: inline-block;
+  border: 1px solid #2f8f69;
+  border-radius: 999px;
+  padding: 1px 6px;
+  font-size: 0.72rem;
+  color: #9ef3cb;
+  background: rgba(28, 123, 85, 0.18);
+}
+
 footer {
   display: flex;
   justify-content: space-between;

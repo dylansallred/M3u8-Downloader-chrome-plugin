@@ -15,6 +15,11 @@ function createJobProcessor({
   getJobTempDirForUrl,
 }) {
   const MAX_TS_PART_BYTES = 512 * 1024 * 1024; // ~512 MiB per TS part
+  const DIRECT_MAX_ATTEMPTS = 4;
+
+  function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
 
   async function concatenateSegmentsStreaming(job, segments, jobTempDir, maxPartBytes) {
     const tsParts = [];
@@ -138,63 +143,97 @@ function createJobProcessor({
       job.updatedAt = Date.now();
 
       const headers = job.headers || {};
-      const client = getClient(job.url);
+      const tempFilePath = `${job.filePath}.part`;
+      let downloaded = false;
+      let lastErr = null;
 
-      await new Promise((resolve, reject) => {
-        const req = client.get(job.url, { headers }, (res) => {
-          if (res.statusCode < 200 || res.statusCode >= 300) {
-            reject(new Error(`Request failed with status ${res.statusCode}`));
-            res.resume();
-            return;
+      // Direct retries write to temp + rename to avoid exposing partial files.
+      for (let attempt = 1; attempt <= DIRECT_MAX_ATTEMPTS && !job.cancelled; attempt += 1) {
+        try {
+          job.bytesDownloaded = 0;
+          job.totalBytes = 0;
+          job.progress = 0;
+          job.updatedAt = Date.now();
+
+          try {
+            await fsPromises.unlink(tempFilePath);
+          } catch (_) {
           }
 
-          const totalBytesHeader = res.headers['content-length'];
-          const totalBytes = totalBytesHeader ? parseInt(totalBytesHeader, 10) : null;
-          if (Number.isFinite(totalBytes) && totalBytes > 0) {
-            job.totalBytes = totalBytes;
-          }
+          const client = getClient(job.url);
+          await new Promise((resolve, reject) => {
+            const req = client.get(job.url, { headers }, (res) => {
+              if (res.statusCode < 200 || res.statusCode >= 300) {
+                reject(new Error(`Request failed with status ${res.statusCode}`));
+                res.resume();
+                return;
+              }
 
-          const outStream = fs.createWriteStream(job.filePath);
-          outStream.on('error', (err) => {
-            console.error('Direct job file stream error', {
-              jobId: job.id,
-              message: err && err.message,
+              const totalBytesHeader = res.headers['content-length'];
+              const totalBytes = totalBytesHeader ? parseInt(totalBytesHeader, 10) : null;
+              if (Number.isFinite(totalBytes) && totalBytes > 0) {
+                job.totalBytes = totalBytes;
+              }
+
+              const outStream = fs.createWriteStream(tempFilePath);
+              outStream.on('error', (err) => {
+                console.error('Direct job file stream error', {
+                  jobId: job.id,
+                  message: err && err.message,
+                });
+                reject(err);
+              });
+
+              res.on('data', (chunk) => {
+                if (job.cancelled) {
+                  req.destroy(new Error('Job cancelled'));
+                  return;
+                }
+                job.bytesDownloaded += chunk.length;
+                if (job.totalBytes) {
+                  job.progress = Math.max(0, Math.min(100, Math.round((job.bytesDownloaded / job.totalBytes) * 100)));
+                }
+                job.updatedAt = Date.now();
+              });
+
+              res.on('error', reject);
+              outStream.on('finish', resolve);
+              res.pipe(outStream);
             });
-            reject(err);
+
+            req.on('error', reject);
+
+            // Hard timeout to avoid hanging on bad connections.
+            const timeoutMs = 30_000;
+            req.setTimeout(timeoutMs, () => {
+              req.destroy(new Error(`Direct download timeout after ${timeoutMs} ms`));
+            });
           });
 
-          res.on('data', (chunk) => {
-            if (job.cancelled) {
-              req.destroy(new Error('Job cancelled'));
-              return;
-            }
-            job.bytesDownloaded += chunk.length;
-            if (job.totalBytes) {
-              job.progress = Math.max(0, Math.min(100, Math.round((job.bytesDownloaded / job.totalBytes) * 100)));
-            }
-            job.updatedAt = Date.now();
+          await fsPromises.rename(tempFilePath, job.filePath);
+          downloaded = true;
+          break;
+        } catch (err) {
+          lastErr = err;
+          if (job.cancelled || attempt >= DIRECT_MAX_ATTEMPTS) {
+            break;
+          }
+
+          const delayMs = getRetryBackoffMs(attempt);
+          logger.warn('Direct job attempt failed, retrying', {
+            jobId: job.id,
+            attempt,
+            nextAttempt: attempt + 1,
+            delayMs,
+            error: err && err.message,
           });
+          await sleep(delayMs);
+        }
+      }
 
-          res.on('end', () => {
-            outStream.end();
-            resolve();
-          });
-
-          res.on('error', (err) => {
-            reject(err);
-          });
-
-          res.pipe(outStream);
-        });
-
-        req.on('error', reject);
-
-        // Hard timeout to avoid hanging on bad connections
-        const timeoutMs = 30_000;
-        req.setTimeout(timeoutMs, () => {
-          req.destroy(new Error(`Direct download timeout after ${timeoutMs} ms`));
-        });
-      });
+      if (!downloaded) {
+        throw lastErr || new Error('Direct download failed after retries');
+      }
 
       if (job.cancelled) {
         job.status = 'cancelled';
@@ -215,6 +254,75 @@ function createJobProcessor({
         job.updatedAt = Date.now();
       }
     }
+  }
+
+  async function tryDirectFallback(job, cause) {
+    if (!job || !job.fallbackUrl || job.cancelled || job.fallbackAttempted) {
+      return false;
+    }
+
+    // Fallback is intended for HLS jobs that made no usable progress.
+    if ((job.completedSegments || 0) > 0) {
+      return false;
+    }
+
+    job.fallbackAttempted = true;
+
+    const original = {
+      url: job.url,
+      filePath: job.filePath,
+      downloadName: job.downloadName,
+      downloadNameMp4: job.downloadNameMp4,
+      totalSegments: job.totalSegments,
+      completedSegments: job.completedSegments,
+      threadStates: job.threadStates,
+      segmentStates: job.segmentStates,
+      failedSegments: job.failedSegments,
+      error: job.error,
+      progress: job.progress,
+    };
+
+    if (!job.originalHlsUrl) {
+      job.originalHlsUrl = original.url;
+    }
+    if (!job.originalHlsDownloadName) {
+      job.originalHlsDownloadName = original.downloadName;
+    }
+    if (!job.originalHlsDownloadNameMp4) {
+      job.originalHlsDownloadNameMp4 = original.downloadNameMp4;
+    }
+
+    job.url = job.fallbackUrl;
+    job.filePath = job.directFallbackFilePath || job.filePath;
+    job.downloadName = job.directFallbackDownloadName || job.downloadName;
+    job.downloadNameMp4 = job.directFallbackDownloadNameMp4 || job.downloadNameMp4;
+    job.totalSegments = 0;
+    job.completedSegments = 0;
+    job.threadStates = [];
+    job.segmentStates = {};
+    job.failedSegments = [];
+    job.error = null;
+    job.progress = 0;
+    job.updatedAt = Date.now();
+
+    logger.warn('Switching HLS job to direct fallback URL', {
+      jobId: job.id,
+      originalUrl: original.url,
+      fallbackUrl: job.fallbackUrl,
+      cause: cause && cause.message,
+    });
+
+    await runDirectJob(job);
+
+    if (job.status === 'error') {
+      const fallbackError = job.error || 'Direct fallback failed';
+      job.error = `${fallbackError} (original HLS failure: ${(cause && cause.message) || original.error || 'unknown'})`;
+      job.fallbackUsed = false;
+    } else {
+      job.fallbackUsed = true;
+    }
+
+    return true;
   }
 
   async function runJob(job) {
@@ -291,6 +399,10 @@ function createJobProcessor({
           : (Number.isFinite(job.maxSegmentAttempts)
               ? job.maxSegmentAttempts
               : DEFAULT_MAX_SEGMENT_ATTEMPTS);
+      const effectiveMaxAttemptsPerSegment =
+        maxAttemptsPerSegment === Infinity && job.fallbackUrl
+          ? 5
+          : maxAttemptsPerSegment;
 
       // Index for new segments; failed segments are managed in a separate queue.
       let nextIndex = 0;
@@ -339,21 +451,43 @@ function createJobProcessor({
           }
 
           // If we didn't pick a primary or queued retry segment, allow this
-          // idle worker to "race" on segments that are already downloading or
-          // retrying, as long as they still have remaining attempts.
+          // idle worker to "race" only on actively downloading segments.
+          // Backoff-managed retries stay in failedQueue until due.
           if (i == null) {
             const candidates = [];
             for (let idx = 0; idx < segments.length; idx++) {
               const state = job.segmentStates[idx];
               if (!state) continue;
-              if (state.status === 'downloading' || state.status === 'retrying') {
-                if (attempts[idx] < maxAttemptsPerSegment) {
+              if (state.status === 'downloading') {
+                if (attempts[idx] < effectiveMaxAttemptsPerSegment) {
                   candidates.push(idx);
                 }
               }
             }
 
             if (candidates.length === 0) {
+              // No immediate race work. If retries are scheduled for the future,
+              // wait briefly and poll again instead of exiting early.
+              if (failedQueue.length > 0) {
+                const now = Date.now();
+                let nextDueAt = Infinity;
+
+                for (const segIdx of failedQueue) {
+                  const dueAt = nextAttemptAt[segIdx] || 0;
+                  if (dueAt > now && dueAt < nextDueAt) {
+                    nextDueAt = dueAt;
+                  }
+                }
+
+                if (Number.isFinite(nextDueAt)) {
+                  const waitMs = Math.max(25, Math.min(300, nextDueAt - now));
+                  await sleep(waitMs);
+                } else {
+                  await sleep(25);
+                }
+                continue;
+              }
+
               // Nothing left to do for this worker.
               break;
             }
@@ -367,6 +501,7 @@ function createJobProcessor({
           const segmentUrl = segments[i];
           let success = false;
           const canonicalSegmentPath = path.join(jobTempDir, `seg-${i}.ts`);
+          let attemptTempPath = null;
 
           // Check if segment already exists from previous download
           if (existingSegments.has(i)) {
@@ -429,7 +564,7 @@ function createJobProcessor({
             // Download this attempt into its own temporary file in the
             // job-specific folder. The first successful attempt will be promoted
             // to the canonical segment file; later successes will be discarded.
-            const attemptTempPath = path.join(
+            attemptTempPath = path.join(
               jobTempDir,
               `seg-${i}-w${workerId}-a${attempt}-${Date.now()}.tmp`
             );
@@ -447,7 +582,11 @@ function createJobProcessor({
               });
             });
             await downloadSegment(segmentUrl, headers, segmentStream, job);
-            segmentStream.end();
+            await new Promise((resolve, reject) => {
+              segmentStream.once('finish', resolve);
+              segmentStream.once('error', reject);
+              segmentStream.end();
+            });
 
             // Check again if another thread completed this segment while we were downloading
             const stateAfterDownload = job.segmentStates[i];
@@ -498,6 +637,12 @@ function createJobProcessor({
               }
             }
           } catch (err) {
+            if (attemptTempPath) {
+              try {
+                await fsPromises.unlink(attemptTempPath);
+              } catch (_) {
+              }
+            }
             console.warn(attempt > 1 ? 'Retry segment failed' : 'Segment download failed', {
               jobId: job.id,
               segmentIndex: i,
@@ -519,7 +664,7 @@ function createJobProcessor({
               continue;
             }
 
-            if (attempt < maxAttemptsPerSegment) {
+            if (attempt < effectiveMaxAttemptsPerSegment) {
               // Queue for another retry with a backoff timestamp.
               job.segmentStates[i] = {
                 status: 'retrying',
@@ -528,7 +673,9 @@ function createJobProcessor({
               };
               const delayMs = getRetryBackoffMs(attempt);
               nextAttemptAt[i] = Date.now() + delayMs;
-              failedQueue.push(i);
+              if (!failedQueue.includes(i)) {
+                failedQueue.push(i);
+              }
             } else {
               // Mark segment as failed after all attempts exhausted
               job.segmentStates[i] = {
@@ -583,6 +730,10 @@ function createJobProcessor({
         workers.push(worker(i));
       }
       await Promise.all(workers);
+
+      if (!job.cancelled && job.failedSegments.length > 0 && job.completedSegments === 0) {
+        throw new Error('All segments failed to download.');
+      }
 
       const tsParts = await concatenateSegmentsStreaming(job, segments, jobTempDir, MAX_TS_PART_BYTES);
       job.tsParts = tsParts;
@@ -645,6 +796,10 @@ function createJobProcessor({
       logger.info('HLS job finished', { jobId: job && job.id, status: job.status });
     } catch (err) {
       logger.error('HLS job failed', { jobId: job && job.id, error: err && err.message });
+      const usedFallback = await tryDirectFallback(job, err);
+      if (usedFallback) {
+        return;
+      }
       if (job) {
         job.status = 'error';
         job.error = (err && err.message) || 'Unknown job failure';

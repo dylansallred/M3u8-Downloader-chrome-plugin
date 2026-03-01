@@ -1,5 +1,6 @@
 let API_BASE = 'http://127.0.0.1:49732';
 const STORAGE_TOKEN_KEY = 'desktopAuthToken';
+const EXTENSION_PROTOCOL_VERSION = 1;
 
 try {
   const params = new URLSearchParams(window.location.search);
@@ -24,6 +25,8 @@ const clearButton = document.getElementById('clearButton');
 let activeTab = null;
 let authToken = null;
 let health = null;
+let extensionInfo = null;
+let compatibilityIssue = null;
 
 function setStatus(text, isError = false) {
   connectionStatus.textContent = text;
@@ -49,7 +52,7 @@ async function fetchHealth() {
     const res = await fetch(`${API_BASE}/v1/health`, {
       headers: {
         'X-Client': 'fetchv-extension',
-        'X-Protocol-Version': '1',
+        'X-Protocol-Version': String(EXTENSION_PROTOCOL_VERSION),
       },
     });
 
@@ -66,14 +69,78 @@ async function fetchHealth() {
   }
 }
 
+function parseVersionParts(input) {
+  return String(input || '')
+    .split(/[^0-9]+/)
+    .filter(Boolean)
+    .map((value) => Number.parseInt(value, 10))
+    .map((value) => (Number.isFinite(value) && value >= 0 ? value : 0));
+}
+
+function compareVersions(a, b) {
+  const av = parseVersionParts(a);
+  const bv = parseVersionParts(b);
+  const len = Math.max(av.length, bv.length);
+  for (let i = 0; i < len; i += 1) {
+    const left = av[i] || 0;
+    const right = bv[i] || 0;
+    if (left > right) return 1;
+    if (left < right) return -1;
+  }
+  return 0;
+}
+
+function updateCompatibilityState() {
+  compatibilityIssue = null;
+  if (!health) return;
+
+  const minProtocol = Number(health?.supportedProtocolVersions?.min ?? health?.protocolVersion ?? EXTENSION_PROTOCOL_VERSION);
+  const maxProtocol = Number(health?.supportedProtocolVersions?.max ?? health?.protocolVersion ?? EXTENSION_PROTOCOL_VERSION);
+
+  if (Number.isFinite(minProtocol) && Number.isFinite(maxProtocol)) {
+    if (EXTENSION_PROTOCOL_VERSION < minProtocol || EXTENSION_PROTOCOL_VERSION > maxProtocol) {
+      compatibilityIssue = `Protocol mismatch. Extension protocol ${EXTENSION_PROTOCOL_VERSION}, app supports ${minProtocol}-${maxProtocol}.`;
+      return;
+    }
+  }
+
+  const minExtensionVersion = String(health?.minExtensionVersion || '').trim();
+  const currentExtensionVersion = String(extensionInfo?.version || '').trim();
+  if (minExtensionVersion && currentExtensionVersion) {
+    if (compareVersions(currentExtensionVersion, minExtensionVersion) < 0) {
+      compatibilityIssue = `Extension ${currentExtensionVersion} is too old. Update to ${minExtensionVersion}+`;
+    }
+  }
+}
+
+function applyCompatibilityUi() {
+  const blocked = Boolean(compatibilityIssue);
+  pairButton.disabled = blocked;
+  if (blocked) {
+    setStatus('Desktop connected, but update required', true);
+    pairingCard.style.display = 'block';
+    pairingResult.textContent = compatibilityIssue;
+    return;
+  }
+
+  pairButton.disabled = false;
+}
+
 async function pairExtension() {
+  if (compatibilityIssue) {
+    pairingResult.textContent = compatibilityIssue;
+    return;
+  }
+
   const code = String(pairingCodeInput.value || '').trim().toUpperCase();
   if (!code) {
     pairingResult.textContent = 'Enter pairing code first.';
     return;
   }
 
-  const extensionInfo = await chrome.runtime.sendMessage({ cmd: 'GET_EXTENSION_INFO' });
+  if (!extensionInfo) {
+    extensionInfo = await chrome.runtime.sendMessage({ cmd: 'GET_EXTENSION_INFO' });
+  }
 
   try {
     const res = await fetch(`${API_BASE}/v1/pair/complete`, {
@@ -81,7 +148,8 @@ async function pairExtension() {
       headers: {
         'Content-Type': 'application/json',
         'X-Client': 'fetchv-extension',
-        'X-Protocol-Version': '1',
+        'X-Protocol-Version': String(EXTENSION_PROTOCOL_VERSION),
+        'X-Extension-Version': String(extensionInfo?.version || ''),
       },
       body: JSON.stringify({
         pairingCode: code,
@@ -125,6 +193,7 @@ function buildJobPayload(item) {
     headers: item.requestHeaders || {},
     sourcePageUrl: (activeTab && activeTab.url) || '',
     sourcePageTitle: title,
+    fallbackMediaUrl: item.fallbackUrl || '',
     settings: {
       fileNaming: 'title',
       maxSegmentAttempts: 'infinite',
@@ -134,6 +203,11 @@ function buildJobPayload(item) {
 }
 
 async function sendJob(item) {
+  if (compatibilityIssue) {
+    alert(`Update required before sending jobs: ${compatibilityIssue}`);
+    return;
+  }
+
   if (!authToken) {
     alert('Pair this extension with the desktop app first.');
     return;
@@ -146,7 +220,8 @@ async function sendJob(item) {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${authToken}`,
         'X-Client': 'fetchv-extension',
-        'X-Protocol-Version': '1',
+        'X-Protocol-Version': String(EXTENSION_PROTOCOL_VERSION),
+        'X-Extension-Version': String(extensionInfo?.version || ''),
       },
       body: JSON.stringify(buildJobPayload(item)),
     });
@@ -161,6 +236,11 @@ async function sendJob(item) {
 
     if (!res.ok) {
       throw new Error(data.error || `HTTP ${res.status}`);
+    }
+
+    if (data.duplicate) {
+      alert(`Already queued: ${data.jobId} (position ${data.queuePosition + 1})`);
+      return;
     }
 
     alert(`Queued: ${data.jobId} (position ${data.queuePosition + 1})`);
@@ -188,6 +268,24 @@ function renderMedia(items) {
     const mb = item.contentLength ? `${Math.round(item.contentLength / (1024 * 1024))} MB` : 'size unknown';
     meta.className = 'muted';
     meta.textContent = `${(item.type || 'file').toUpperCase()} | ${mb}`;
+
+    if (item.type === 'hls' && item.fallbackUrl) {
+      let fallbackHost = '';
+      try {
+        fallbackHost = new URL(item.fallbackUrl).hostname;
+      } catch {
+        fallbackHost = '';
+      }
+
+      const fallback = document.createElement('span');
+      fallback.className = 'fallback-pill';
+      fallback.textContent = fallbackHost
+        ? `Fallback: ${fallbackHost}`
+        : 'Fallback available';
+      fallback.title = item.fallbackUrl;
+      meta.appendChild(document.createTextNode(' | '));
+      meta.appendChild(fallback);
+    }
 
     const url = document.createElement('p');
     url.className = 'media-url';
@@ -219,7 +317,13 @@ async function refreshMedia() {
 async function refreshConnection() {
   try {
     const data = await fetchHealth();
+    updateCompatibilityState();
     setStatus(`Desktop connected (${data.appVersion})`);
+
+    if (compatibilityIssue) {
+      applyCompatibilityUi();
+      return;
+    }
 
     if (!authToken || data.pairingRequired) {
       pairingCard.style.display = 'block';
@@ -231,6 +335,8 @@ async function refreshConnection() {
       pairingResult.textContent = '';
     }
   } catch (err) {
+    compatibilityIssue = null;
+    applyCompatibilityUi();
     pairingCard.style.display = 'block';
     setStatus('Desktop app not running at 127.0.0.1:49732', true);
     pairingResult.textContent = 'Open desktop app, then click Refresh.';
@@ -265,6 +371,7 @@ async function initialize() {
   }
 
   authToken = await getToken();
+  extensionInfo = await chrome.runtime.sendMessage({ cmd: 'GET_EXTENSION_INFO' });
 
   pairButton.addEventListener('click', pairExtension);
   refreshButton.addEventListener('click', async () => {
