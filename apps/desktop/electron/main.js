@@ -2,7 +2,6 @@ const { app, BrowserWindow, ipcMain, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { autoUpdater } = require('electron-updater');
-const { createApiServer } = require('@m3u8/downloader-api');
 const { API } = require('@m3u8/contracts');
 
 let mainWindow = null;
@@ -26,6 +25,12 @@ const updaterState = {
 };
 
 const appSettingsPath = () => path.join(app.getPath('userData'), 'settings.json');
+
+function getLogsDirPath() {
+  const logsDir = path.join(app.getPath('userData'), 'logs');
+  fs.mkdirSync(logsDir, { recursive: true });
+  return logsDir;
+}
 
 function readSettings() {
   try {
@@ -272,6 +277,9 @@ async function checkForUpdatesNow() {
 }
 
 async function startLocalApi() {
+  process.env.LOG_DIR = process.env.LOG_DIR || getLogsDirPath();
+
+  const { createApiServer } = require('@m3u8/downloader-api');
   const dataDir = path.join(app.getPath('userData'), 'data');
   const downloadDir = path.join(dataDir, 'downloads');
 
