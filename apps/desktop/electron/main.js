@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, session } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { autoUpdater } = require('electron-updater');
@@ -40,6 +40,8 @@ function readSettings() {
         queueMaxConcurrent: 1,
         queueAutoStart: true,
         checkUpdatesOnStartup: true,
+        tmdbApiKey: '',
+        downloadThreads: 8,
       };
     }
     const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
@@ -47,12 +49,16 @@ function readSettings() {
       queueMaxConcurrent: parsed.queueMaxConcurrent ?? 1,
       queueAutoStart: parsed.queueAutoStart ?? true,
       checkUpdatesOnStartup: parsed.checkUpdatesOnStartup ?? true,
+      tmdbApiKey: parsed.tmdbApiKey ?? '',
+      downloadThreads: parsed.downloadThreads ?? 8,
     };
   } catch {
     return {
       queueMaxConcurrent: 1,
       queueAutoStart: true,
       checkUpdatesOnStartup: true,
+      tmdbApiKey: '',
+      downloadThreads: 8,
     };
   }
 }
@@ -279,7 +285,16 @@ async function checkForUpdatesNow() {
 async function startLocalApi() {
   process.env.LOG_DIR = process.env.LOG_DIR || getLogsDirPath();
 
+  const savedSettings = readSettings();
+  if (savedSettings.tmdbApiKey) {
+    process.env.TMDB_API_KEY = savedSettings.tmdbApiKey;
+  }
+
   const { createApiServer } = require('@m3u8/downloader-api');
+  const apiConfig = require('@m3u8/downloader-api/src/config');
+  if (savedSettings.downloadThreads > 0) {
+    apiConfig.downloadThreads = savedSettings.downloadThreads;
+  }
   const dataDir = path.join(app.getPath('userData'), 'data');
   const downloadDir = path.join(dataDir, 'downloads');
 
@@ -326,6 +341,26 @@ function createWindow() {
     return { action: 'deny' };
   });
 
+  const isDev = !!process.env.VITE_DEV_SERVER_URL;
+  const cspParts = [
+    `default-src 'self'`,
+    `script-src 'self'${isDev ? " 'unsafe-eval' 'unsafe-inline'" : ''}`,
+    `style-src 'self' 'unsafe-inline'`,
+    `connect-src 'self' http://127.0.0.1:* ws://127.0.0.1:* http://localhost:* ws://localhost:*`,
+    `img-src 'self' data: http://127.0.0.1:* https://image.tmdb.org`,
+    `font-src 'self' data:`,
+  ];
+  const csp = cspParts.join('; ');
+
+  session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+    callback({
+      responseHeaders: {
+        ...details.responseHeaders,
+        'Content-Security-Policy': [csp],
+      },
+    });
+  });
+
   const devUrl = process.env.VITE_DEV_SERVER_URL;
   if (devUrl) {
     mainWindow.loadURL(devUrl);
@@ -345,6 +380,13 @@ function registerIpc() {
 
   ipcMain.handle('settings:save', async (event, nextSettings) => {
     const merged = writeSettings(nextSettings || {});
+    const apiConfig = require('@m3u8/downloader-api/src/config');
+    if ('tmdbApiKey' in (nextSettings || {})) {
+      apiConfig.tmdbApiKey = merged.tmdbApiKey || '';
+    }
+    if ('downloadThreads' in (nextSettings || {})) {
+      apiConfig.downloadThreads = Number(merged.downloadThreads) || 0;
+    }
     return merged;
   });
 

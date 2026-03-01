@@ -3,18 +3,40 @@ const fs = require('fs');
 const logger = require('../utils/logger');
 const { historyFileParamValidation } = require('../utils/validators');
 
-async function registerHistoryRoutes(app, fsPromises, downloadDir) {
+async function registerHistoryRoutes(app, fsPromises, downloadDir, jobs) {
   // Simple download history based on files present in downloads directory
   app.get('/api/history', async (req, res) => {
     try {
       const items = await fsPromises.readdir(downloadDir, { withFileTypes: true });
       const files = [];
 
+      // Collect all filenames for cross-reference (to skip .ts when .mp4 exists)
+      const allFileNames = new Set(items.filter(e => e.isFile()).map(e => e.name));
+
+      // Build set of active job file basenames to exclude intermediate .ts files
+      const activeJobFiles = new Set();
+      if (jobs) {
+        for (const [, job] of jobs) {
+          const status = job.status || job.queueStatus;
+          if (status && status !== 'completed' && status !== 'completed-with-errors' && status !== 'failed' && status !== 'cancelled') {
+            if (job.filePath) activeJobFiles.add(path.basename(job.filePath));
+            if (job.mp4Path) activeJobFiles.add(path.basename(job.mp4Path));
+          }
+        }
+      }
+
       for (const entry of items) {
         if (!entry.isFile()) continue;
         const fileName = entry.name;
         const ext = path.extname(fileName).toLowerCase();
         if (ext !== '.mp4' && ext !== '.ts') continue;
+
+        // Skip intermediate .ts files: if a matching .mp4 exists or the job is still active
+        if (ext === '.ts') {
+          const mp4Variant = fileName.replace(/\.ts$/i, '.mp4');
+          if (allFileNames.has(mp4Variant)) continue;
+          if (activeJobFiles.has(fileName)) continue;
+        }
 
         const fullPath = path.join(downloadDir, fileName);
         let stats;
@@ -43,8 +65,9 @@ async function registerHistoryRoutes(app, fsPromises, downloadDir) {
         const isValidJobId = /^[a-z0-9]+$/i.test(jobIdPrefix) && jobIdPrefix.length <= 20;
 
         let hasThumb = false;
+        let thumbName;
         if (isValidJobId) {
-          const thumbName = `${jobIdPrefix}-thumb.jpg`;
+          thumbName = `${jobIdPrefix}-thumb.jpg`;
           const thumbPath = path.join(downloadDir, thumbName);
           try {
             await fsPromises.access(thumbPath);
@@ -54,14 +77,44 @@ async function registerHistoryRoutes(app, fsPromises, downloadDir) {
           }
         }
 
+        // Cross-reference with jobs Map for TMDB metadata and remote thumbnails
+        let thumbnailUrl = hasThumb ? `/downloads/${thumbName}` : null;
+        let title = null;
+        let tmdbReleaseDate = null;
+        let tmdbMetadata = null;
+
+        if (jobs && isValidJobId) {
+          // Find matching job by scanning the jobs Map for a job whose filePath contains this fileName
+          for (const [, job] of jobs) {
+            if (!job.filePath) continue;
+            const jobFileName = path.basename(job.filePath);
+            // Match by file path basename or mp4 path basename
+            const mp4FileName = job.mp4Path ? path.basename(job.mp4Path) : null;
+            if (jobFileName === fileName || mp4FileName === fileName) {
+              title = job.title || null;
+              tmdbReleaseDate = job.tmdbReleaseDate || null;
+              tmdbMetadata = job.tmdbMetadata || null;
+              // Use TMDB thumbnail if no local thumb
+              if (!thumbnailUrl && Array.isArray(job.thumbnailUrls) && job.thumbnailUrls.length > 0) {
+                thumbnailUrl = job.thumbnailUrls[0];
+              }
+              break;
+            }
+          }
+        }
+
         files.push({
           id: fileName,
           fileName,
           label,
+          jobId: isValidJobId ? jobIdPrefix : null,
+          title,
           sizeBytes,
           modifiedAt,
           ext,
-          thumbnailUrl: hasThumb ? `/downloads/${thumbName}` : null,
+          thumbnailUrl,
+          tmdbReleaseDate,
+          tmdbMetadata,
         });
       }
 

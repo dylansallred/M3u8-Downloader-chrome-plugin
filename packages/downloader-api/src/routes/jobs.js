@@ -71,7 +71,7 @@ function registerJobRoutes(
   // Create a new download job from the extension queue
   // Supports ?immediate=true to bypass queue and start immediately (legacy behavior)
   app.post('/api/jobs', jobValidation, async (req, res) => {
-    const { queue, threads, settings } = req.body || {};
+    const { queue, settings } = req.body || {};
     if (!queue || !queue.url) {
       return res.status(400).json({ error: 'Missing queue.url in request body' });
     }
@@ -150,10 +150,9 @@ function registerJobRoutes(
       downloadNameMp4 = directName;
     }
 
-    const parsedThreads = Number(threads);
-    const clampedThreads = Number.isFinite(parsedThreads) && parsedThreads > 0
-      ? Math.min(16, parsedThreads)
-      : DEFAULT_MAX_CONCURRENT;
+    // Use server-configured downloadThreads if set, otherwise engine default
+    const serverThreads = config.downloadThreads > 0 ? config.downloadThreads : DEFAULT_MAX_CONCURRENT;
+    const clampedThreads = Math.min(16, Math.max(1, serverThreads));
 
     const job = {
       id,
@@ -175,7 +174,7 @@ function registerJobRoutes(
       thumbnailPath: null,
       thumbnailPaths: null,
       thumbnailUrls: [],
-      skipThumbnailGeneration: true,
+      skipThumbnailGeneration: false,
       tmdbMetadata: null,
       downloadNameMp4,
       cancelled: false,
@@ -204,7 +203,7 @@ function registerJobRoutes(
     const isTv = !!matchSeasonEp;
 
     // Add to queue or start immediately based on query parameter
-    logger.info('Job create request', { jobId: id, requestedThreads: threads, parsedThreads, maxConcurrent: clampedThreads, url: queue.url });
+    logger.info('Job create request', { jobId: id, maxConcurrent: clampedThreads, url: queue.url });
 
     if (immediate) {
       // Legacy behavior: start immediately without queue
@@ -283,6 +282,12 @@ function registerJobRoutes(
               job.tmdbId = tmdbResult.id;
               job.tmdbTitle = tmdbResult.title;
               job.tmdbReleaseDate = tmdbResult.releaseDate;
+              job.tmdbMetadata = {
+                overview: tmdbResult.overview,
+                runtime: tmdbResult.runtime,
+                tagline: tmdbResult.tagline,
+                genres: tmdbResult.genres,
+              };
               job.skipThumbnailGeneration = true;
               queueManager.saveQueue();
               logger.info('TMDB lookup success', { jobId: job.id, tmdbId: tmdbResult.id, thumbnails: job.thumbnailUrls.length });
@@ -387,6 +392,10 @@ function registerJobRoutes(
       subtitlePath: job.subtitlePath || null,
       subtitleDownloadUrl,
       updatedAt: job.updatedAt,
+      tmdbId: job.tmdbId || null,
+      tmdbTitle: job.tmdbTitle || null,
+      tmdbReleaseDate: job.tmdbReleaseDate || null,
+      tmdbMetadata: job.tmdbMetadata || null,
     });
   });
 

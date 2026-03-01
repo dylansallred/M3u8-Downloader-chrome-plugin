@@ -7,8 +7,8 @@ module.exports = defineConfig({
   expect: {
     timeout: 10_000,
   },
-  fullyParallel: false,
-  workers: 1,
+  fullyParallel: true,
+  workers: '50%',
   reporter: [
     ['list'],
     ['html', { outputFolder: 'playwright-report', open: 'never' }],

@@ -119,7 +119,7 @@ function createApiServer(options = {}) {
 
   const apiLimiter = rateLimit({
     windowMs: 60 * 1000,
-    max: 120,
+    max: 600,
     standardHeaders: true,
     legacyHeaders: false,
   });
@@ -134,8 +134,8 @@ function createApiServer(options = {}) {
 
   app.use('/api', apiLimiter);
   app.use('/v1', apiLimiter);
-  app.use('/api/jobs', jobCreationLimiter);
-  app.use('/v1/jobs', jobCreationLimiter);
+  app.post('/api/jobs', jobCreationLimiter);
+  app.post('/v1/jobs', jobCreationLimiter);
 
   // Lock /api routes to desktop-local usage boundaries. Extension bridge must use /v1.
   app.use('/api', (req, res, next) => {
@@ -173,7 +173,7 @@ function createApiServer(options = {}) {
     }
   }
 
-  const { runJob, runDirectJob } = createJobProcessor({
+  const { runJob: _runJob, runDirectJob: _runDirectJob } = createJobProcessor({
     downloadDir: resolvedDownloadDir,
     FFMPEG_PATH,
     FFPROBE_PATH,
@@ -182,6 +182,15 @@ function createApiServer(options = {}) {
     fsPromises,
     getJobTempDirForUrl,
   });
+
+  // Wrap job runners to apply current downloadThreads setting at start time
+  const applyThreadSetting = (job) => {
+    if (appConfig.downloadThreads > 0) {
+      job.maxConcurrent = Math.min(16, Math.max(1, appConfig.downloadThreads));
+    }
+  };
+  const runJob = (job) => { applyThreadSetting(job); return _runJob(job); };
+  const runDirectJob = (job) => { applyThreadSetting(job); return _runDirectJob(job); };
 
   const queueManager = new QueueManager({
     queueFilePath: path.join(resolvedDownloadDir, 'queue.json'),
@@ -226,6 +235,10 @@ function createApiServer(options = {}) {
       fallbackUsed: !!job.fallbackUsed,
       thumbnailUrls: mergeThumbnailUrls(job),
       updatedAt: job.updatedAt,
+      tmdbId: job.tmdbId || null,
+      tmdbTitle: job.tmdbTitle || null,
+      tmdbReleaseDate: job.tmdbReleaseDate || null,
+      tmdbMetadata: job.tmdbMetadata || null,
     };
   }
 
@@ -340,7 +353,7 @@ function createApiServer(options = {}) {
       thumbnailPath: null,
       thumbnailPaths: null,
       thumbnailUrls: [],
-      skipThumbnailGeneration: true,
+      skipThumbnailGeneration: false,
       downloadNameMp4,
       fallbackUrl: fallbackMediaUrl || null,
       originalHlsUrl: isHls ? queue.url : null,
@@ -839,7 +852,7 @@ function createApiServer(options = {}) {
     });
   });
 
-  registerHistoryRoutes(app, fsPromises, resolvedDownloadDir);
+  registerHistoryRoutes(app, fsPromises, resolvedDownloadDir, jobs);
   registerQueueRoutes(app, queueManager);
   registerJobRoutes(
     app,
