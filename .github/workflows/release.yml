@@ -60,17 +60,17 @@ jobs:
           CSC_LINK: ${{ secrets.CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
 
-      - name: Verify notarization staple (DMG)
+      - name: Verify notarization staple (App Bundle)
         run: |
           set -euo pipefail
-          DMG_FILE="$(find apps/desktop/dist-electron -type f -name "*.dmg" | head -n 1)"
-          if [ -z "${DMG_FILE}" ]; then
-            echo "No DMG artifact found for notarization validation."
+          APP_BUNDLE="$(find apps/desktop/dist-electron -type d -name "*.app" | head -n 1)"
+          if [ -z "${APP_BUNDLE}" ]; then
+            echo "No .app bundle found for notarization validation."
             exit 1
           fi
           STRICT_STAPLER="${STRICT_STAPLER:-0}"
           for attempt in $(seq 1 15); do
-            if xcrun stapler staple "${DMG_FILE}" && xcrun stapler validate "${DMG_FILE}"; then
+            if xcrun stapler staple "${APP_BUNDLE}" && xcrun stapler validate "${APP_BUNDLE}"; then
               echo "Staple/validate succeeded on attempt ${attempt}"
               exit 0
             fi
