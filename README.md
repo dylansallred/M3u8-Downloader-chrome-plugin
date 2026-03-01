@@ -105,3 +105,14 @@ GitHub release workflow (tags `v*.*.*`) is in `.github/workflows/release.yml`.
   - `npm test`
   - `npm run test:e2e -- --project=chromium`
   - `npm run build:desktop`
+
+## Updater Smoke Test (Release-to-Release)
+
+Use this flow to validate in-app auto-update behavior against real GitHub releases:
+
+1. Publish `v2.0.0` and install it on test machines (macOS + Windows).
+2. Publish `v2.0.1` from the same release pipeline.
+3. On installed `v2.0.0`, run `Check for updates` from Settings > Updates.
+4. Verify update is found, release notes render, and download completes.
+5. Click `Restart now` and confirm app relaunches on `v2.0.1`.
+6. Repeat once with `Later (30m)` and confirm reminder appears again after 30 minutes.
