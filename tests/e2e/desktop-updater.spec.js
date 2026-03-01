@@ -184,7 +184,7 @@ test('updates view reflects updater state transitions and enables install when d
     await expect(page.getByText('Updates', { exact: true })).toBeVisible();
 
     // Phase is shown as a Badge, not in a "Phase:" paragraph
-    await expect(page.getByText('idle')).toBeVisible();
+    await expect(page.getByText('idle', { exact: true })).toBeVisible();
     // Install and Later buttons are disabled when not in 'downloaded' phase
     await expect(page.getByRole('button', { name: 'Install' })).toBeDisabled();
     await expect(page.getByRole('button', { name: 'Later' })).toBeDisabled();
@@ -1141,7 +1141,7 @@ test('desktop queue controls mutate queue state via API actions', async ({ page 
     await expect(jobCards.nth(1)).toContainText('Fixture Job (HLS Retry)');
 
     // "Retry" is the primary action button when status is cancelled (standard retry)
-    await queueCard.getByRole('button', { name: 'Retry' }).click();
+    await queueCard.getByRole('button', { name: 'Retry', exact: true }).click();
     await expect(jobCards).toHaveCount(3);
     await expect(jobCards.nth(2)).toContainText('Fixture Job (Retry)');
 
