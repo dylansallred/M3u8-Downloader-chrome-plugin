@@ -16,7 +16,7 @@
     "release:tag": "./scripts/release-tag.sh",
     "package:extension": "cd apps/extension && zip -r ../../m3u8-extension.zip . -x \"*.DS_Store\"",
     "lint": "echo 'No lint configured yet'",
-    "test": "node --test tests/api.integration.test.js",
+    "test": "node --test --test-force-exit tests/api.integration.test.js",
     "test:e2e": "playwright test"
   },
   "devDependencies": {
