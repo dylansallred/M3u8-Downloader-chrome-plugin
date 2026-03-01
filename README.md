@@ -92,8 +92,8 @@ GitHub release workflow (tags `v*.*.*`) is in `.github/workflows/release.yml`.
 
 - macOS release job fails fast when any signing/notarization secret is missing.
 - macOS artifacts are validated with `xcrun stapler validate` (DMG must be notarized/stapled).
-- Windows release job fails fast when code-sign secrets are missing.
-- Windows installers are validated with `signtool verify`.
+- Windows builds can run unsigned when code-sign secrets are not configured.
+- Windows installers are validated with `signtool verify` when signing secrets are configured.
 - Extension artifact attachment runs only after successful macOS + Windows release jobs.
 
 ## CI and Checks

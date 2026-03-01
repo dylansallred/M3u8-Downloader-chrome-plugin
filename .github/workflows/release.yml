@@ -66,26 +66,12 @@ jobs:
           xcrun stapler validate "${DMG_FILE}"
 
   windows-desktop:
-    name: Desktop Windows (Signed)
+    name: Desktop Windows
     runs-on: windows-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Validate Windows signing secrets
-        shell: pwsh
-        env:
-          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
-          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
-        run: |
-          $missing = @()
-          if ([string]::IsNullOrWhiteSpace($env:WIN_CSC_LINK)) { $missing += "WIN_CSC_LINK" }
-          if ([string]::IsNullOrWhiteSpace($env:WIN_CSC_KEY_PASSWORD)) { $missing += "WIN_CSC_KEY_PASSWORD" }
-          if ($missing.Count -gt 0) {
-            $missing | ForEach-Object { Write-Host "Missing required secret: $_" }
-            exit 1
-          }
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -104,6 +90,7 @@ jobs:
           WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
 
       - name: Verify code signatures
+        if: ${{ secrets.WIN_CSC_LINK != '' && secrets.WIN_CSC_KEY_PASSWORD != '' }}
         shell: pwsh
         run: |
           $signtool = Get-Command signtool.exe -ErrorAction SilentlyContinue
