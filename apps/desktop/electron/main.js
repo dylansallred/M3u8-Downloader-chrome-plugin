@@ -8,6 +8,8 @@ let mainWindow = null;
 let apiServer = null;
 let updaterTimer = null;
 let updaterReminderTimer = null;
+let updaterInstallTimer = null;
+let updaterInstallRequested = false;
 const apiHost = process.env.M3U8_API_HOST || API.host;
 const apiPort = Number(process.env.M3U8_API_PORT || API.port);
 
@@ -254,6 +256,23 @@ function clearUpdaterReminderTimer() {
   }
 }
 
+function clearUpdaterInstallTimer() {
+  if (updaterInstallTimer) {
+    clearTimeout(updaterInstallTimer);
+    updaterInstallTimer = null;
+  }
+}
+
+function isTranslocatedMacApp() {
+  if (process.platform !== 'darwin') return false;
+  try {
+    const exePath = String(app.getPath('exe') || '');
+    return exePath.includes('/AppTranslocation/') || exePath.startsWith('/private/var/folders/');
+  } catch {
+    return false;
+  }
+}
+
 function normalizeReleaseNotes(updateInfo) {
   const source = updateInfo?.releaseNotes;
   if (!source) return [];
@@ -303,6 +322,8 @@ function configureAutoUpdater() {
   autoUpdater.autoInstallOnAppQuit = false;
 
   autoUpdater.on('checking-for-update', () => {
+    clearUpdaterInstallTimer();
+    updaterInstallRequested = false;
     clearUpdaterReminderTimer();
     updaterState.phase = 'checking';
     updaterState.message = 'Checking for updates...';
@@ -315,6 +336,8 @@ function configureAutoUpdater() {
   });
 
   autoUpdater.on('update-available', (info) => {
+    clearUpdaterInstallTimer();
+    updaterInstallRequested = false;
     clearUpdaterReminderTimer();
     updaterState.phase = 'downloading';
     updaterState.message = `Downloading version ${info.version}...`;
@@ -328,6 +351,8 @@ function configureAutoUpdater() {
   });
 
   autoUpdater.on('update-not-available', (info) => {
+    clearUpdaterInstallTimer();
+    updaterInstallRequested = false;
     clearUpdaterReminderTimer();
     updaterState.phase = 'idle';
     updaterState.message = 'You are up to date.';
@@ -350,6 +375,8 @@ function configureAutoUpdater() {
   });
 
   autoUpdater.on('update-downloaded', (info) => {
+    clearUpdaterInstallTimer();
+    updaterInstallRequested = false;
     clearUpdaterReminderTimer();
     updaterState.phase = 'downloaded';
     updaterState.message = `Update ${info.version} downloaded. Restart to install.`;
@@ -364,6 +391,8 @@ function configureAutoUpdater() {
   });
 
   autoUpdater.on('error', (error) => {
+    clearUpdaterInstallTimer();
+    updaterInstallRequested = false;
     clearUpdaterReminderTimer();
     updaterState.phase = 'error';
     updaterState.message = 'Update check failed';
@@ -718,8 +747,63 @@ function registerIpc() {
 
   ipcMain.handle('updater:install-now', async () => {
     clearUpdaterReminderTimer();
-    autoUpdater.quitAndInstall(false, true);
-    return { ok: true };
+    if (updaterState.phase !== 'downloaded') {
+      return { ok: false, error: 'No downloaded update available' };
+    }
+    if (!app.isPackaged) {
+      return { ok: false, error: 'Install update is only available in packaged builds' };
+    }
+    if (isTranslocatedMacApp()) {
+      const error = 'Move the app to /Applications before installing updates';
+      updaterState.phase = 'error';
+      updaterState.message = 'Update install blocked';
+      updaterState.error = error;
+      sendToRenderer('updater:event', updaterState);
+      return { ok: false, error };
+    }
+
+    updaterInstallRequested = true;
+    clearUpdaterInstallTimer();
+    updaterState.phase = 'installing';
+    updaterState.message = 'Installing update and restarting...';
+    updaterState.error = null;
+    sendToRenderer('updater:event', updaterState);
+
+    try {
+      autoUpdater.autoInstallOnAppQuit = true;
+      setImmediate(() => {
+        try {
+          autoUpdater.quitAndInstall(false, true);
+        } catch (err) {
+          updaterInstallRequested = false;
+          updaterState.phase = 'error';
+          updaterState.message = 'Update install failed';
+          updaterState.error = String((err && err.message) || err || 'Unknown updater error');
+          sendToRenderer('updater:event', updaterState);
+          console.error('[desktop] quitAndInstall failed', err);
+        }
+      });
+
+      // Some environments ignore quitAndInstall; fallback to normal quit so autoInstallOnAppQuit can apply.
+      updaterInstallTimer = setTimeout(() => {
+        if (!updaterInstallRequested) return;
+        console.warn('[desktop] quitAndInstall did not exit promptly; falling back to app.quit()');
+        try {
+          app.quit();
+        } catch (err) {
+          console.error('[desktop] app.quit fallback failed', err);
+        }
+      }, 3_000);
+
+      return { ok: true };
+    } catch (err) {
+      updaterInstallRequested = false;
+      updaterState.phase = 'error';
+      updaterState.message = 'Update install failed';
+      updaterState.error = String((err && err.message) || err || 'Unknown updater error');
+      sendToRenderer('updater:event', updaterState);
+      return { ok: false, error: updaterState.error };
+    }
   });
 
   ipcMain.handle('updater:remind-later', async (event, minutes = 30) => {
@@ -779,6 +863,8 @@ async function bootstrap() {
 }
 
 app.on('before-quit', async () => {
+  updaterInstallRequested = false;
+  clearUpdaterInstallTimer();
   if (updaterTimer) {
     clearInterval(updaterTimer);
     updaterTimer = null;
