@@ -26,8 +26,28 @@ function resolveUrls() {
     };
   }
 
+  if (platform === 'linux') {
+    const arch = process.arch === 'arm64' ? 'linuxarm64' : 'linux64';
+    return {
+      ffmpegUrl: ffmpegExplicit
+        || `https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-${arch}-gpl.tar.xz`,
+      ffprobeUrl: ffprobeExplicit
+        || `https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-${arch}-gpl.tar.xz`,
+    };
+  }
+
+  if (platform === 'win32') {
+    const arch = process.arch === 'arm64' ? 'winarm64' : 'win64';
+    return {
+      ffmpegUrl: ffmpegExplicit
+        || `https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-${arch}-gpl.zip`,
+      ffprobeUrl: ffprobeExplicit
+        || `https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-${arch}-gpl.zip`,
+    };
+  }
+
   throw new Error(
-    'No default ffmpeg download URLs for this platform. Set FFMPEG_DOWNLOAD_URL and FFPROBE_DOWNLOAD_URL.'
+    `No default ffmpeg download URLs for this platform (${platform}). Set FFMPEG_DOWNLOAD_URL and FFPROBE_DOWNLOAD_URL.`
   );
 }
 
