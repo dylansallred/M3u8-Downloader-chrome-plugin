@@ -4,7 +4,7 @@ const fs = require('fs');
 const http = require('http');
 const https = require('https');
 const { URL } = require('url');
-const { execSync } = require('child_process');
+const { spawnSync } = require('child_process');
 const WebSocket = require('ws');
 const rateLimit = require('express-rate-limit');
 const { API, HEADER, CLIENT } = require('@m3u8/contracts');
@@ -29,7 +29,13 @@ const TMDB_CACHE_VERSION = 1;
 const TMDB_CACHE_MAX_ENTRIES = 2000;
 const TMDB_CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
-function detectFFmpegPath(explicitPath) {
+function detectFFmpegPath(explicitPath, options = {}) {
+  const trustExplicitPath = Boolean(options.trustExplicitPath);
+  if (trustExplicitPath && explicitPath && fs.existsSync(explicitPath)) {
+    logger.info('FFmpeg detected (trusted explicit path)', { ffmpegPath: explicitPath });
+    return explicitPath;
+  }
+
   const possiblePaths = [
     explicitPath,
     process.env.FFMPEG_PATH,
@@ -39,12 +45,23 @@ function detectFFmpegPath(explicitPath) {
     'C:\\ffmpeg\\bin\\ffmpeg.exe',
     'C:\\Program Files\\ffmpeg\\bin\\ffmpeg.exe',
     'ffmpeg',
-  ];
+  ].filter(Boolean);
+  const dedupedPaths = [...new Set(possiblePaths)];
 
-  for (const ffmpegPath of possiblePaths) {
-    if (!ffmpegPath) continue;
+  for (const ffmpegPath of dedupedPaths) {
     try {
-      execSync(`"${ffmpegPath}" -version`, { stdio: 'ignore', timeout: 5000 });
+      const probe = spawnSync(ffmpegPath, ['-version'], {
+        stdio: 'ignore',
+        timeout: 20_000,
+      });
+      if (probe.status !== 0) {
+        // Some binaries can exceed the probe timeout in constrained environments.
+        if (probe.error && probe.error.code === 'ETIMEDOUT' && fs.existsSync(ffmpegPath)) {
+          logger.info('FFmpeg probe timed out; using configured path', { ffmpegPath });
+          return ffmpegPath;
+        }
+        continue;
+      }
       logger.info('FFmpeg detected', { ffmpegPath });
       return ffmpegPath;
     } catch {
@@ -54,6 +71,85 @@ function detectFFmpegPath(explicitPath) {
 
   logger.warn('FFmpeg not detected - conversion and thumbnails disabled');
   return null;
+}
+
+function detectYtDlpPath(explicitPath, options = {}) {
+  const trustExplicitPath = Boolean(options.trustExplicitPath);
+  if (trustExplicitPath && explicitPath && fs.existsSync(explicitPath)) {
+    logger.info('yt-dlp detected (trusted explicit path)', { ytDlpPath: explicitPath });
+    return explicitPath;
+  }
+
+  const possiblePaths = [
+    explicitPath,
+    process.env.YTDLP_PATH,
+    process.env.YT_DLP_PATH,
+    '/opt/homebrew/bin/yt-dlp',
+    '/usr/local/bin/yt-dlp',
+    '/usr/bin/yt-dlp',
+    'yt-dlp',
+  ].filter(Boolean);
+  const dedupedPaths = [...new Set(possiblePaths)];
+
+  for (const ytDlpPath of dedupedPaths) {
+    try {
+      const probe = spawnSync(ytDlpPath, ['--version'], {
+        stdio: 'ignore',
+        timeout: 20_000,
+      });
+      if (probe.status === 0) {
+        return ytDlpPath;
+      }
+      if (probe.error && probe.error.code === 'ETIMEDOUT' && fs.existsSync(ytDlpPath)) {
+        logger.info('yt-dlp probe timed out; using configured path', { ytDlpPath });
+        return ytDlpPath;
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  return '';
+}
+
+function isYouTubeUrl(value) {
+  if (typeof value !== 'string' || !value.trim()) return false;
+  try {
+    const parsed = new URL(value.trim());
+    const host = String(parsed.hostname || '').toLowerCase();
+    return host === 'youtube.com'
+      || host.endsWith('.youtube.com')
+      || host === 'youtu.be'
+      || host.endsWith('.youtu.be');
+  } catch {
+    return false;
+  }
+}
+
+function extractYouTubeVideoId(value) {
+  if (typeof value !== 'string' || !value.trim()) return '';
+  try {
+    const parsed = new URL(value.trim());
+    const host = String(parsed.hostname || '').toLowerCase();
+    const pathParts = String(parsed.pathname || '').split('/').filter(Boolean);
+    let videoId = '';
+
+    if (host === 'youtu.be' || host.endsWith('.youtu.be')) {
+      videoId = String(pathParts[0] || '').trim();
+    } else if (host === 'youtube.com' || host.endsWith('.youtube.com')) {
+      const first = String(pathParts[0] || '').toLowerCase();
+      if (first === 'watch') {
+        videoId = String(parsed.searchParams.get('v') || '').trim();
+      } else if (first === 'shorts' || first === 'live' || first === 'embed') {
+        videoId = String(pathParts[1] || '').trim();
+      }
+    }
+
+    if (!/^[A-Za-z0-9_-]{6,20}$/.test(videoId)) return '';
+    return videoId;
+  } catch {
+    return '';
+  }
 }
 
 function createApiServer(options = {}) {
@@ -66,7 +162,9 @@ function createApiServer(options = {}) {
     initialQueueSettings,
     ffmpegPath,
     ffprobePath,
+    trustBinaryPaths = false,
     onFocus,
+    ytDlpPath,
   } = options;
 
   if (!dataDir) {
@@ -76,9 +174,21 @@ function createApiServer(options = {}) {
   const resolvedDownloadDir = downloadDir || path.join(dataDir, 'downloads');
   fs.mkdirSync(resolvedDownloadDir, { recursive: true });
 
-  const FFMPEG_PATH = detectFFmpegPath(ffmpegPath);
+  const FFMPEG_PATH = detectFFmpegPath(ffmpegPath, { trustExplicitPath: trustBinaryPaths });
   const FFPROBE_PATH = ffprobePath || process.env.FFPROBE_PATH
     || (FFMPEG_PATH ? FFMPEG_PATH.replace(/ffmpeg(\.exe)?$/i, 'ffprobe$1') : null);
+  const YT_DLP_PATH = detectYtDlpPath(
+    ytDlpPath || process.env.YTDLP_PATH || process.env.YT_DLP_PATH,
+    { trustExplicitPath: trustBinaryPaths },
+  );
+  if (YT_DLP_PATH) {
+    process.env.YTDLP_PATH = YT_DLP_PATH;
+    logger.info('yt-dlp detected', { ytDlpPath: YT_DLP_PATH });
+  } else {
+    logger.warn('yt-dlp not detected - YouTube URL downloads will fail', {
+      envHint: 'Set YTDLP_PATH or install yt-dlp in PATH',
+    });
+  }
 
   const fsPromises = fs.promises;
 
@@ -245,6 +355,9 @@ function createApiServer(options = {}) {
       totalSegments: job.totalSegments,
       completedSegments: job.completedSegments,
       bytesDownloaded: job.bytesDownloaded,
+      totalBytes: Number(job.totalBytes || 0) || 0,
+      speedBps: Number(job.speedBps || 0) || 0,
+      etaSeconds: Number.isFinite(job.etaSeconds) ? Number(job.etaSeconds) : null,
       failedSegments: Array.isArray(job.failedSegments) ? job.failedSegments.length : 0,
       threadStates: Array.isArray(job.threadStates) ? job.threadStates : [],
       segmentStates: job.segmentStates || {},
@@ -259,6 +372,7 @@ function createApiServer(options = {}) {
       tmdbTitle: job.tmdbTitle || null,
       tmdbReleaseDate: job.tmdbReleaseDate || null,
       tmdbMetadata: job.tmdbMetadata || null,
+      youtubeMetadata: job.youtubeMetadata || null,
       mediaHints: job.mediaHints || null,
     };
   }
@@ -324,6 +438,27 @@ function createApiServer(options = {}) {
         )
       ),
     };
+    const queueYoutubeMetadata = queue.youtubeMetadata && typeof queue.youtubeMetadata === 'object'
+      ? queue.youtubeMetadata
+      : null;
+    const initialThumbnailUrls = [];
+    const pushThumbnailUrl = (value) => {
+      const candidate = sanitizeString(value, 4096);
+      if (!candidate || !isValidHttpUrl(candidate)) return;
+      if (initialThumbnailUrls.includes(candidate)) return;
+      initialThumbnailUrls.push(candidate);
+    };
+
+    pushThumbnailUrl(queue.thumbnailUrl);
+    pushThumbnailUrl(queueYoutubeMetadata && queueYoutubeMetadata.thumbnailUrl);
+
+    if (initialThumbnailUrls.length === 0 && isYouTubeUrl(queue.url)) {
+      const videoId = extractYouTubeVideoId(queue.url)
+        || sanitizeString(queueYoutubeMetadata && queueYoutubeMetadata.videoId, 32);
+      if (/^[A-Za-z0-9_-]{6,20}$/.test(videoId)) {
+        pushThumbnailUrl(`https://i.ytimg.com/vi/${encodeURIComponent(videoId)}/hqdefault.jpg`);
+      }
+    }
 
     let filePath;
     let tsName;
@@ -406,9 +541,10 @@ function createApiServer(options = {}) {
       mp4Path: null,
       thumbnailPath: null,
       thumbnailPaths: null,
-      thumbnailUrls: [],
+      thumbnailUrls: initialThumbnailUrls,
       skipThumbnailGeneration: false,
       mediaHints,
+      youtubeMetadata: queueYoutubeMetadata,
       downloadNameMp4,
       fallbackUrl: fallbackMediaUrl || null,
       originalHlsUrl: isHls ? queue.url : null,
@@ -676,6 +812,7 @@ function createApiServer(options = {}) {
 
   async function enrichTmdb(job) {
     if (!appConfig.tmdbApiKey) return;
+    if (isYouTubeUrl(job && job.url)) return;
 
     try {
       const hints = job.mediaHints || inferMediaMetadata({
@@ -901,12 +1038,70 @@ function createApiServer(options = {}) {
     };
   }
 
+  function sanitizeYoutubeMetadata(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return null;
+    }
+
+    const videoIdRaw = sanitizeString(value.videoId, 32);
+    const videoId = /^[A-Za-z0-9_-]{6,20}$/.test(videoIdRaw) ? videoIdRaw : '';
+    const thumbnailUrlRaw = sanitizeString(value.thumbnailUrl, 4096);
+    const thumbnailUrl = isValidHttpUrl(thumbnailUrlRaw) ? thumbnailUrlRaw : '';
+
+    const output = {
+      videoId,
+      title: sanitizeString(value.title, 255),
+      channelName: sanitizeString(value.channelName, 180),
+      channelUrl: sanitizeString(value.channelUrl, 4096),
+      channelId: sanitizeString(value.channelId, 80),
+      uploadDate: sanitizeString(value.uploadDate, 80),
+      thumbnailUrl,
+      description: sanitizeString(value.description, 1000),
+      durationSeconds: (() => {
+        const n = Number(value.durationSeconds);
+        return Number.isFinite(n) && n > 0 ? Math.min(24 * 60 * 60, Math.floor(n)) : null;
+      })(),
+      viewCount: (() => {
+        const n = Number(value.viewCount);
+        return Number.isFinite(n) && n > 0 ? Math.min(9_999_999_999_999, Math.floor(n)) : null;
+      })(),
+    };
+
+    if (!Object.values(output).some((entry) => entry != null && entry !== '')) {
+      return null;
+    }
+
+    return output;
+  }
+
+  function resolveIncomingThumbnailUrl(payload) {
+    const explicit = sanitizeString(payload && payload.thumbnailUrl, 4096);
+    if (isValidHttpUrl(explicit)) {
+      return explicit;
+    }
+
+    const youtubeMetadata = sanitizeYoutubeMetadata(payload && payload.youtubeMetadata);
+    if (youtubeMetadata && isValidHttpUrl(youtubeMetadata.thumbnailUrl)) {
+      return youtubeMetadata.thumbnailUrl;
+    }
+
+    const videoId = extractYouTubeVideoId(String(payload && payload.mediaUrl || '').trim())
+      || String(youtubeMetadata && youtubeMetadata.videoId || '').trim();
+    if (videoId) {
+      return `https://i.ytimg.com/vi/${encodeURIComponent(videoId)}/hqdefault.jpg`;
+    }
+
+    return '';
+  }
+
   function validateCreateJobRequest(body) {
     const payload = body && typeof body === 'object' ? body : {};
     const mediaUrl = sanitizeString(payload.mediaUrl, 4096);
     const mediaType = sanitizeString(payload.mediaType, 16).toLowerCase();
     const fallbackMediaUrl = sanitizeString(payload.fallbackMediaUrl, 4096);
     const titleHints = sanitizeTitleHints(payload.titleHints);
+    const youtubeMetadata = sanitizeYoutubeMetadata(payload.youtubeMetadata);
+    const thumbnailUrl = resolveIncomingThumbnailUrl({ ...payload, mediaUrl, youtubeMetadata });
 
     if (!isValidHttpUrl(mediaUrl)) {
       const err = new Error('mediaUrl must be a valid http/https URL');
@@ -956,6 +1151,8 @@ function createApiServer(options = {}) {
       sourcePageTitle: sanitizeString(payload.sourcePageTitle, 255),
       fallbackMediaUrl,
       titleHints,
+      youtubeMetadata,
+      thumbnailUrl,
       headers: sanitizeHeaders(payload.headers),
       settings: {
         fileNaming,
@@ -998,6 +1195,13 @@ function createApiServer(options = {}) {
       return;
     }
 
+    if (isYouTubeUrl(body.mediaUrl) && !YT_DLP_PATH) {
+      res.status(400).json({
+        error: 'YouTube URL detected, but yt-dlp is not installed. Install yt-dlp and restart the desktop app.',
+      });
+      return;
+    }
+
     const queue = {
       url: body.mediaUrl,
       title: body.title || body.sourcePageTitle || body.resourceName || 'Download',
@@ -1005,6 +1209,8 @@ function createApiServer(options = {}) {
       headers: body.headers || {},
       sourcePageUrl: body.sourcePageUrl || '',
       titleHints: body.titleHints || null,
+      youtubeMetadata: body.youtubeMetadata || null,
+      thumbnailUrl: body.thumbnailUrl || '',
     };
 
     const settings = {
@@ -1074,6 +1280,8 @@ function createApiServer(options = {}) {
       name: sourceJob.title || 'HLS Retry',
       headers: sourceJob.headers || {},
       sourcePageUrl: sourceJob.sourcePageUrl || '',
+      youtubeMetadata: sourceJob.youtubeMetadata || null,
+      thumbnailUrl: Array.isArray(sourceJob.thumbnailUrls) ? String(sourceJob.thumbnailUrls[0] || '') : '',
     };
 
     const settings = {
@@ -1120,6 +1328,8 @@ function createApiServer(options = {}) {
       name: sourceJob.title || 'Retry Job',
       headers: sourceJob.headers || {},
       sourcePageUrl: sourceJob.sourcePageUrl || '',
+      youtubeMetadata: sourceJob.youtubeMetadata || null,
+      thumbnailUrl: Array.isArray(sourceJob.thumbnailUrls) ? String(sourceJob.thumbnailUrls[0] || '') : '',
     };
 
     const settings = {

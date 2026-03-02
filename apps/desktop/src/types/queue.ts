@@ -21,6 +21,19 @@ export interface TmdbMetadata {
   mediaType?: 'movie' | 'tv';
 }
 
+export interface YoutubeMetadata {
+  videoId?: string;
+  title?: string;
+  channelName?: string;
+  channelUrl?: string;
+  channelId?: string;
+  uploadDate?: string;
+  thumbnailUrl?: string;
+  description?: string;
+  durationSeconds?: number | null;
+  viewCount?: number | null;
+}
+
 export interface QueueJob {
   id: string;
   title: string;
@@ -31,6 +44,9 @@ export interface QueueJob {
   totalSegments: number;
   completedSegments: number;
   bytesDownloaded: number;
+  totalBytes?: number;
+  speedBps?: number;
+  etaSeconds?: number | null;
   error: string | null;
   fallbackUsed: boolean;
   fallbackUrl: string | null;
@@ -42,6 +58,7 @@ export interface QueueJob {
   tmdbTitle?: string;
   tmdbReleaseDate?: string;
   tmdbMetadata?: TmdbMetadata | null;
+  youtubeMetadata?: YoutubeMetadata | null;
   segmentStates?: Record<string, SegmentState>;
   threadStates?: ThreadState[];
 }

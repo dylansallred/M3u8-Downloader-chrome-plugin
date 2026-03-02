@@ -101,6 +101,60 @@ function getDownloadDirPath() {
   return downloadDir;
 }
 
+function getBundledYtDlpPath() {
+  const explicit = String(process.env.YTDLP_PATH || process.env.YT_DLP_PATH || '').trim();
+  if (explicit) {
+    return explicit;
+  }
+
+  const binaryName = process.platform === 'win32' ? 'yt-dlp.exe' : 'yt-dlp';
+  const candidates = [
+    path.join(process.resourcesPath || '', 'bin', binaryName),
+    path.join(app.getAppPath(), 'bin', binaryName),
+    path.join(__dirname, '..', 'bin', binaryName),
+  ].filter(Boolean);
+
+  for (const candidate of candidates) {
+    try {
+      if (!candidate || !fs.existsSync(candidate)) continue;
+      if (process.platform !== 'win32') {
+        fs.chmodSync(candidate, 0o755);
+      }
+      return candidate;
+    } catch {
+      continue;
+    }
+  }
+
+  return '';
+}
+
+function getBundledBinaryPath(binaryNames = []) {
+  const names = Array.isArray(binaryNames) ? binaryNames.filter(Boolean) : [];
+  if (names.length === 0) return '';
+
+  const candidates = [];
+  for (const name of names) {
+    candidates.push(path.join(process.resourcesPath || '', 'bin', name));
+    candidates.push(path.join(app.getAppPath(), 'bin', name));
+    candidates.push(path.join(__dirname, '..', 'bin', name));
+  }
+
+  for (const candidate of candidates) {
+    try {
+      if (!candidate || !fs.existsSync(candidate)) continue;
+      if (process.platform !== 'win32') {
+        fs.chmodSync(candidate, 0o755);
+      }
+      return candidate;
+    } catch {
+      continue;
+    }
+  }
+
+  return '';
+}
+
 function resolveHistoryFilePath(fileName) {
   const safeName = path.basename(String(fileName || ''));
   if (!safeName) return null;
@@ -338,6 +392,24 @@ async function checkForUpdatesNow() {
 
 async function startLocalApi() {
   process.env.LOG_DIR = process.env.LOG_DIR || getLogsDirPath();
+  const bundledYtDlpPath = getBundledYtDlpPath();
+  if (bundledYtDlpPath) {
+    process.env.YTDLP_PATH = bundledYtDlpPath;
+    process.env.YT_DLP_PATH = bundledYtDlpPath;
+    console.info(`[desktop] Using bundled yt-dlp at ${bundledYtDlpPath}`);
+  }
+  const ffmpegBinaryName = process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg';
+  const ffprobeBinaryName = process.platform === 'win32' ? 'ffprobe.exe' : 'ffprobe';
+  const bundledFfmpegPath = getBundledBinaryPath([ffmpegBinaryName]);
+  const bundledFfprobePath = getBundledBinaryPath([ffprobeBinaryName]);
+  if (bundledFfmpegPath) {
+    process.env.FFMPEG_PATH = bundledFfmpegPath;
+    console.info(`[desktop] Using bundled ffmpeg at ${bundledFfmpegPath}`);
+  }
+  if (bundledFfprobePath) {
+    process.env.FFPROBE_PATH = bundledFfprobePath;
+    console.info(`[desktop] Using bundled ffprobe at ${bundledFfprobePath}`);
+  }
 
   const savedSettings = readSettings();
   if (savedSettings.tmdbApiKey) {
@@ -361,6 +433,10 @@ async function startLocalApi() {
     appVersion: app.getVersion(),
     dataDir,
     downloadDir,
+    ffmpegPath: bundledFfmpegPath || process.env.FFMPEG_PATH,
+    ffprobePath: bundledFfprobePath || process.env.FFPROBE_PATH,
+    ytDlpPath: bundledYtDlpPath || process.env.YTDLP_PATH || process.env.YT_DLP_PATH,
+    trustBinaryPaths: Boolean(bundledFfmpegPath || bundledYtDlpPath),
     initialQueueSettings: {
       maxConcurrent: Number(savedSettings.queueMaxConcurrent) || 1,
       autoStart: savedSettings.queueAutoStart !== false,
@@ -414,7 +490,7 @@ function createWindow() {
     `script-src 'self'${isDev ? " 'unsafe-eval' 'unsafe-inline'" : ''}`,
     `style-src 'self' 'unsafe-inline'`,
     `connect-src 'self' http://127.0.0.1:* ws://127.0.0.1:* http://localhost:* ws://localhost:*`,
-    `img-src 'self' data: http://127.0.0.1:* https://image.tmdb.org`,
+    `img-src 'self' data: http://127.0.0.1:* https://image.tmdb.org https://i.ytimg.com https://*.ytimg.com`,
     `font-src 'self' data:`,
   ];
   const csp = cspParts.join('; ');

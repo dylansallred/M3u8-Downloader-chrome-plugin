@@ -45,6 +45,7 @@ export function QueueJobCard({ job, apiBase, onAction }: QueueJobCardProps) {
   const thumbnailUrl = resolveThumbnailUrl(job.thumbnailUrls?.[0], apiBase);
   const year = extractYear(job.tmdbReleaseDate);
   const genres = job.tmdbMetadata?.genres?.slice(0, 2) ?? [];
+  const channelName = String(job.youtubeMetadata?.channelName || '').trim();
   const hasMetaLine = year || genres.length > 0;
 
   return (
@@ -69,6 +70,11 @@ export function QueueJobCard({ job, apiBase, onAction }: QueueJobCardProps) {
               {getQueueStatusLabel(jobStatus)}
             </Badge>
           </div>
+          {channelName && (
+            <p className="text-[10px] text-foreground-muted truncate mb-0.5">
+              Channel: {channelName}
+            </p>
+          )}
           {hasMetaLine && (
             <div className="flex items-center gap-1.5 mb-0.5">
               {year && <span className="text-[10px] text-foreground-muted">{year}</span>}

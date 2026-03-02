@@ -113,9 +113,12 @@ class QueueManager {
           downloadName,
           downloadNameMp4,
           bytesDownloaded,
+          totalBytes,
           totalSegments,
           completedSegments,
           progress,
+          speedBps,
+          etaSeconds,
           status,
           queueStatus,
           queuePosition,
@@ -145,9 +148,12 @@ class QueueManager {
           downloadName,
           downloadNameMp4,
           bytesDownloaded,
+          totalBytes,
           totalSegments,
           completedSegments,
           progress,
+          speedBps,
+          etaSeconds,
           status,
           queueStatus,
           queuePosition,
@@ -182,6 +188,7 @@ class QueueManager {
           originalHlsDownloadNameMp4: job.originalHlsDownloadNameMp4,
           fallbackAttempted: !!job.fallbackAttempted,
           fallbackUsed: !!job.fallbackUsed,
+          youtubeMetadata: job.youtubeMetadata || null,
         };
       });
 
@@ -228,8 +235,11 @@ class QueueManager {
       progress: job.progress || 0,
       status: job.status || 'pending',
       bytesDownloaded: job.bytesDownloaded || 0,
+      totalBytes: Number(job.totalBytes || 0) || 0,
       totalSegments: job.totalSegments || 0,
       completedSegments: job.completedSegments || 0,
+      speedBps: Number(job.speedBps || 0) || 0,
+      etaSeconds: Number.isFinite(job.etaSeconds) ? Number(job.etaSeconds) : null,
       failedSegments: Array.isArray(job.failedSegments) ? job.failedSegments.length : 0,
       queuedAt: job.queuedAt,
       startedAt: job.startedAt,
@@ -243,6 +253,7 @@ class QueueManager {
       tmdbTitle: job.tmdbTitle,
       tmdbReleaseDate: job.tmdbReleaseDate,
       tmdbMetadata: job.tmdbMetadata || null,
+      youtubeMetadata: job.youtubeMetadata || null,
     }));
   }
 

@@ -268,6 +268,33 @@ async function getTabMedia(tabId) {
   return response && response.items ? response.items : [];
 }
 
+async function syncActiveTabUrlMedia() {
+  if (!activeTab || !activeTab.id) return;
+
+  try {
+    const latestTab = await chrome.tabs.get(activeTab.id);
+    if (latestTab) {
+      activeTab = latestTab;
+    }
+  } catch {
+    // Keep existing activeTab snapshot if live tab lookup fails.
+  }
+
+  const tabUrl = String(activeTab && activeTab.url || '').trim();
+  if (!tabUrl) return;
+
+  try {
+    await chrome.runtime.sendMessage({
+      cmd: 'SYNC_TAB_URL_MEDIA',
+      tabId: activeTab.id,
+      tabUrl,
+      tabTitle: String(activeTab.title || '').trim(),
+    });
+  } catch {
+    // Ignore sync failures so popup loading still works.
+  }
+}
+
 async function removeTabMediaItem(tabId, itemId) {
   const response = await chrome.runtime.sendMessage({
     cmd: 'REMOVE_TAB_MEDIA',
@@ -285,6 +312,10 @@ function buildJobPayload(item) {
   const titleHints = pickJobTitleHints(inferTitleHints(item, pageTitle, displayTitle));
   const baseTitle = displayTitle || pageTitle || item.filename || 'Download';
   const title = appendEpisodeTagToTitle(baseTitle, titleHints);
+  const youtubeMetadata = item && item.youtubeMetadata && typeof item.youtubeMetadata === 'object'
+    ? item.youtubeMetadata
+    : null;
+  const thumbnailUrl = String(youtubeMetadata && youtubeMetadata.thumbnailUrl || '').trim();
 
   return {
     mediaUrl,
@@ -296,6 +327,8 @@ function buildJobPayload(item) {
     sourcePageTitle: pageTitle || title,
     fallbackMediaUrl: item.fallbackUrl || '',
     titleHints,
+    youtubeMetadata,
+    thumbnailUrl,
     settings: {
       fileNaming: 'title',
       maxSegmentAttempts: 'infinite',
@@ -548,8 +581,20 @@ function pickPreferredContentTitle(item, pageTitle, tvContextFromUrl) {
 }
 
 function getDisplayTitle(item) {
-  // Use stored source page title first so titles stay stable across navigation.
   const pageTitle = String(item.sourcePageTitle || (activeTab && activeTab.title) || '').trim();
+  const youtubeTitle = cleanYoutubeTitleText(item && item.youtubeMetadata && item.youtubeMetadata.title);
+  if (youtubeTitle && !isLikelySiteSlogan(youtubeTitle)) {
+    return youtubeTitle;
+  }
+
+  if (isYoutubePageItem(item)) {
+    const cleanedPageTitle = cleanYoutubeTitleText(pageTitle);
+    if (cleanedPageTitle && !isLikelySiteSlogan(cleanedPageTitle)) {
+      return cleanedPageTitle;
+    }
+  }
+
+  // Use stored source page title first so titles stay stable across navigation.
   const sourcePageUrl = String(item.sourcePageUrl || (activeTab && activeTab.url) || '').trim();
   const tvContextFromUrl = detectTvContextFromUrl(sourcePageUrl);
   const seriesTitleFromPageTitle = tvContextFromUrl ? extractSeriesTitleFromPageTitle(pageTitle) : '';
@@ -616,6 +661,21 @@ function normalizeTitleText(value) {
     .replace(/[-]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+function cleanYoutubeTitleText(value) {
+  return String(value || '')
+    .replace(/^\(\d+\)\s*/, '')
+    .replace(/^\[\d+\]\s*/, '')
+    .replace(/\s*[-|]\s*youtube\s*$/i, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function isYoutubePageItem(item) {
+  const mediaKind = String(item && item.mediaKind || '').toLowerCase();
+  if (mediaKind === 'youtube-page') return true;
+  return String(item && item.contentType || '').toLowerCase() === 'video/youtube';
 }
 
 function stripTitleNoise(value) {
@@ -796,8 +856,9 @@ function pickPreferredEpisodeHint(currentHint, nextHint) {
 }
 
 function inferTitleHints(item, pageTitle, displayTitle) {
+  const isYoutubePageDetection = isYoutubePageItem(item);
   const sourcePageUrl = String(item && item.sourcePageUrl || (activeTab && activeTab.url) || '').trim();
-  const sourceUrlHint = inferHintFromSourcePageUrl(sourcePageUrl);
+  const sourceUrlHint = isYoutubePageDetection ? null : inferHintFromSourcePageUrl(sourcePageUrl);
   const decodedFilename = decodeFilenameCandidate(item && item.filename);
   const pageCandidates = Array.isArray(item && item.pageTitleCandidates)
     ? item.pageTitleCandidates
@@ -805,12 +866,37 @@ function inferTitleHints(item, pageTitle, displayTitle) {
       .map((entry, index) => ({
         field: `pageCandidate.${index}`,
         label: `Page Candidate (${String(entry.source || 'unknown')})`,
+        source: String(entry.source || '').trim().toLowerCase(),
         value: String(entry.value || '').trim(),
       }))
       .filter((entry) => entry.value)
     : [];
 
-  const resourceSignalCandidates = Array.isArray(item && item.resourceSignals)
+  const selectedPageCandidates = isYoutubePageDetection
+    ? pageCandidates.filter((entry) => {
+      const source = String(entry.source || '').trim();
+      return source === 'youtube.title'
+        || source === 'youtube.channel'
+        || source === 'youtube.dom.title'
+        || source === 'youtube.dom.channel'
+        || source === 'document.title'
+        || source.startsWith('meta[');
+    })
+    : pageCandidates;
+
+  const youtubeMetadata = item && item.youtubeMetadata && typeof item.youtubeMetadata === 'object'
+    ? item.youtubeMetadata
+    : null;
+  const youtubeCandidates = youtubeMetadata
+    ? [
+      { field: 'youtube.title', label: 'YouTube Title', value: cleanYoutubeTitleText(String(youtubeMetadata.title || '').trim()) },
+      { field: 'youtube.channel', label: 'YouTube Channel', value: String(youtubeMetadata.channelName || '').trim() },
+    ].filter((entry) => entry.value)
+    : [];
+
+  const resourceSignalCandidates = isYoutubePageDetection
+    ? []
+    : Array.isArray(item && item.resourceSignals)
     ? item.resourceSignals
       .filter((entry) => entry && typeof entry === 'object')
       .flatMap((entry, index) => {
@@ -852,12 +938,53 @@ function inferTitleHints(item, pageTitle, displayTitle) {
   const candidates = [
     { field: 'displayTitle', label: 'Display Title', value: displayTitle },
     { field: 'pageTitle', label: 'Page Title', value: pageTitle },
-    ...pageCandidates,
+    ...youtubeCandidates,
+    ...selectedPageCandidates,
     ...resourceSignalCandidates,
     { field: 'filename', label: 'Filename', value: item && item.filename },
     { field: 'filenameDecoded', label: 'Decoded Filename', value: decodedFilename },
     { field: 'url', label: 'Request URL', value: item && item.url },
   ].filter((candidate) => String(candidate.value || '').trim());
+
+  if (isYoutubePageDetection) {
+    const lookupSource = cleanYoutubeTitleText(
+      (youtubeMetadata && youtubeMetadata.title)
+      || displayTitle
+      || pageTitle
+      || (item && item.filename)
+      || ''
+    );
+    const lookupTitle = stripTitleNoise(
+      lookupSource
+      || cleanYoutubeTitleText(displayTitle)
+      || cleanYoutubeTitleText(pageTitle)
+      || (item && item.filename)
+      || ''
+    );
+    const candidateTitles = candidates.map((candidate) => ({
+      field: candidate.field,
+      label: candidate.label,
+      value: trimDebugText(candidate.value),
+      normalized: trimDebugText(normalizeTitleText(candidate.value)),
+      lookupCandidate: trimDebugText(stripTitleNoise(candidate.value)),
+      matchedPattern: null,
+      seasonNumber: null,
+      episodeNumber: null,
+    }));
+
+    return {
+      lookupTitle,
+      seasonNumber: null,
+      episodeNumber: null,
+      isTvCandidate: false,
+      matchedPattern: null,
+      matchedField: null,
+      mediaGuess: lookupTitle ? 'movie_or_unknown' : 'unknown',
+      candidateTitles,
+      tvContextFromUrl: false,
+      pageIsTvContext: false,
+    };
+  }
 
   const pageEpisodeHint = item && item.pageEpisodeHint && typeof item.pageEpisodeHint === 'object'
     ? item.pageEpisodeHint
@@ -1065,6 +1192,7 @@ function buildDebugPayload(item, pageTitle, displayTitle, titleHints, resolution
       displayTitle: displayTitle || null,
       filename: item.filename || null,
       url: item.url || null,
+      youtubeMetadata: item.youtubeMetadata || null,
       pageEpisodeHint: item.pageEpisodeHint || null,
       resourceSignals: Array.isArray(item.resourceSignals) ? item.resourceSignals : [],
     },
@@ -1086,6 +1214,7 @@ function formatContentType(contentType) {
   if (!contentType) return null;
   const ct = contentType.split(';')[0].trim();
   const friendly = {
+    'video/youtube': 'YouTube Page',
     'application/x-mpegurl': 'HLS Playlist',
     'application/vnd.apple.mpegurl': 'HLS Playlist',
     'application/dash+xml': 'DASH Manifest',
@@ -1150,11 +1279,14 @@ function renderMedia(items) {
 
     const typePill = document.createElement('span');
     typePill.className = 'pill pill-accent';
-    typePill.textContent = (item.type || 'file').toUpperCase();
+    const isYoutubePageDetection = String(item.mediaKind || '').toLowerCase() === 'youtube-page';
+    typePill.textContent = isYoutubePageDetection
+      ? 'YT'
+      : (item.type || 'file').toUpperCase();
     pillGroup.appendChild(typePill);
 
     const episodeTag = formatEpisodeTag(titleHints.seasonNumber, titleHints.episodeNumber);
-    if (episodeTag || titleHints.isTvCandidate) {
+    if (!isYoutubePageDetection && (episodeTag || titleHints.isTvCandidate)) {
       const tvPill = document.createElement('span');
       tvPill.className = 'pill pill-muted';
       tvPill.textContent = episodeTag || 'TV';
@@ -1181,6 +1313,14 @@ function renderMedia(items) {
       const typeEl = document.createElement('span');
       typeEl.textContent = friendlyType;
       infoRow.appendChild(typeEl);
+    }
+
+    const youtubeChannel = String(item && item.youtubeMetadata && item.youtubeMetadata.channelName || '').trim();
+    if (youtubeChannel) {
+      if (hostname || friendlyType) infoRow.appendChild(makeDot());
+      const channelEl = document.createElement('span');
+      channelEl.textContent = `Channel: ${youtubeChannel}`;
+      infoRow.appendChild(channelEl);
     }
 
     if (titleHints.lookupTitle && normalizeTitleText(titleHints.lookupTitle) !== normalizeTitleText(displayTitle)) {
@@ -1292,8 +1432,11 @@ function renderMedia(items) {
     streamBtn.innerHTML = '<svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><polygon points="6 4 20 12 6 20 6 4"/></svg>';
     streamBtn.title = 'Open stream player';
     streamBtn.setAttribute('aria-label', 'Open stream player');
-    if (!buildStreamPlayerUrl(item)) {
+    if (!buildStreamPlayerUrl(item) || isYoutubePageDetection) {
       streamBtn.disabled = true;
+      if (isYoutubePageDetection) {
+        streamBtn.title = 'Stream player is unavailable for YouTube page detections';
+      }
     }
     streamBtn.addEventListener('click', () => streamMedia(item, streamBtn));
 
@@ -1373,6 +1516,7 @@ function renderMedia(items) {
 
 async function refreshMedia() {
   if (!activeTab) return;
+  await syncActiveTabUrlMedia();
   const items = await getTabMedia(activeTab.id);
   renderMedia(items);
 }

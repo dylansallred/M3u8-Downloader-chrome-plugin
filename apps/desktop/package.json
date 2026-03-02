@@ -11,7 +11,9 @@
   "scripts": {
     "dev": "concurrently -k \"npm:dev:renderer\" \"npm:dev:electron\"",
     "dev:renderer": "vite",
-    "dev:electron": "wait-on tcp:5173 && cross-env VITE_DEV_SERVER_URL=http://localhost:5173 electron .",
+    "dev:electron": "wait-on tcp:5173 && cross-env DEBUG_YTDLP_PROGRESS=1 VITE_DEV_SERVER_URL=http://localhost:5173 electron .",
+    "fetch:yt-dlp": "node ./scripts/fetch-yt-dlp.cjs",
+    "fetch:ffmpeg": "node ./scripts/fetch-ffmpeg.cjs",
     "build": "vite build",
     "pack": "npm run build && electron-builder --dir",
     "dist": "npm run build && electron-builder"
@@ -55,6 +57,15 @@
       "electron/**/*",
       "dist/**/*",
       "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "bin",
+        "to": "bin",
+        "filter": [
+          "**/*"
+        ]
+      }
     ],
     "publish": [
       {

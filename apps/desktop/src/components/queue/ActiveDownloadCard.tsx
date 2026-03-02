@@ -49,6 +49,7 @@ export function ActiveDownloadCard({ job, metrics, apiBase, onAction }: ActiveDo
   const runtime = job ? formatRuntime(job.tmdbMetadata?.runtime) : null;
   const genres = job?.tmdbMetadata?.genres?.slice(0, 3) ?? [];
   const displayText = job?.tmdbMetadata?.tagline || job?.tmdbMetadata?.overview || null;
+  const channelName = String(job?.youtubeMetadata?.channelName || '').trim();
   const hasMetadata = year || runtime || genres.length > 0 || displayText;
   const threads = job?.threadStates;
   const activeThreads = threads?.filter((t) => t.status === 'downloading').length ?? 0;
@@ -72,7 +73,7 @@ export function ActiveDownloadCard({ job, metrics, apiBase, onAction }: ActiveDo
             <img
               src={thumbnailUrl}
               alt=""
-              className="w-24 h-36 object-cover rounded shrink-0"
+              className="w-44 h-24 object-contain bg-black rounded shrink-0"
               loading="lazy"
               onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
             />
@@ -86,6 +87,11 @@ export function ActiveDownloadCard({ job, metrics, apiBase, onAction }: ActiveDo
             </div>
             {job.fallbackUsed && (
               <p className="text-primary text-[11px]">Fallback used: direct media URL</p>
+            )}
+            {channelName && (
+              <p className="text-[11px] text-foreground-muted mt-0.5">
+                Channel: {channelName}
+              </p>
             )}
             {hasMetadata && (
               <div className="mt-1.5 space-y-1">
@@ -152,7 +158,10 @@ export function ActiveDownloadCard({ job, metrics, apiBase, onAction }: ActiveDo
             ETA: <span className="text-foreground font-medium tabular-nums">{isFinalizing ? 'finalizing...' : formatEta(metrics.etaSeconds)}</span>
           </span>
           <span className="text-foreground-muted whitespace-nowrap">
-            Downloaded: <span className="text-foreground font-medium tabular-nums">{Math.round((job.bytesDownloaded || 0) / (1024 * 1024))} MB</span>
+            Downloaded: <span className="text-foreground font-medium tabular-nums">
+              {Math.round((job.bytesDownloaded || 0) / (1024 * 1024))} MB
+              {Number(job.totalBytes || 0) > 0 ? ` / ${Math.round((Number(job.totalBytes || 0)) / (1024 * 1024))} MB` : ''}
+            </span>
           </span>
           {totalThreads > 0 && (
             <span className="text-foreground-muted flex items-center gap-1 whitespace-nowrap">

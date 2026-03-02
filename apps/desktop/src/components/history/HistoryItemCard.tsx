@@ -28,6 +28,7 @@ export function HistoryItemCard({ item, apiBase, onOpenFile, onOpenFolder, onDel
   const ext = String(item.ext || '').replace(/^\./, '').toUpperCase();
   const thumbnailUrl = resolveThumbnailUrl(item.thumbnailUrl, apiBase);
   const title = deriveTitle(item);
+  const channelName = String(item.youtubeMetadata?.channelName || '').trim();
   const year = extractYear(item.tmdbReleaseDate);
   const genres = item.tmdbMetadata?.genres?.slice(0, 2) ?? [];
   const hasMetaLine = year || genres.length > 0;
@@ -53,6 +54,11 @@ export function HistoryItemCard({ item, apiBase, onOpenFile, onOpenFolder, onDel
 
         <div className="flex-1 min-w-0 py-1.5 px-2.5 flex flex-col justify-center">
           <h4 className="text-[13px] font-medium text-foreground truncate mb-0.5">{title}</h4>
+          {channelName && (
+            <div className="text-[11px] text-foreground-subtle truncate mb-0.5">
+              Channel: {channelName}
+            </div>
+          )}
           <div className="flex items-center gap-1.5">
             {item.jobId && (
               <span className="text-[10px] text-foreground-subtle font-mono">{item.jobId}</span>

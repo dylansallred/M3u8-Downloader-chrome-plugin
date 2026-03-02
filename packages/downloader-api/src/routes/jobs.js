@@ -11,10 +11,6 @@ const { inferMediaMetadata } = require('../utils/mediaMetadata');
 const { buildDownloadAssetUrl, buildJobStorageDir } = require('../utils/downloadPaths');
 const config = require('../config');
 
-if (!config.subdlApiKey) {
-  logger.warn('SUBDL_API_KEY environment variable not set - subtitle download will be disabled');
-}
-
 function isHttpUrl(value) {
   if (typeof value !== 'string' || !value.trim()) return false;
   try {
@@ -540,6 +536,9 @@ function registerJobRoutes(
       totalSegments: job.totalSegments,
       completedSegments: job.completedSegments,
       bytesDownloaded: job.bytesDownloaded,
+      totalBytes: Number(job.totalBytes || 0) || 0,
+      speedBps: Number(job.speedBps || 0) || 0,
+      etaSeconds: Number.isFinite(job.etaSeconds) ? Number(job.etaSeconds) : null,
       failedSegments: Array.isArray(job.failedSegments) ? job.failedSegments.length : 0,
       threadStates: Array.isArray(job.threadStates) ? job.threadStates : [],
       segmentStates: changedSegments, // Only send changed segments
@@ -557,6 +556,7 @@ function registerJobRoutes(
       tmdbTitle: job.tmdbTitle || null,
       tmdbReleaseDate: job.tmdbReleaseDate || null,
       tmdbMetadata: job.tmdbMetadata || null,
+      youtubeMetadata: job.youtubeMetadata || null,
       mediaHints: job.mediaHints || null,
     });
   });

@@ -145,6 +145,12 @@ export function useActiveJob(queueData: QueueData, apiBase: string) {
     const status = String(job.queueStatus || job.status || '');
     const now = Date.now();
     const bytes = Number(job.bytesDownloaded || 0);
+    const totalBytes = Number(job.totalBytes || 0);
+    const serverSpeedBps = Number(job.speedBps || 0);
+    const serverEtaRaw = Number(job.etaSeconds);
+    const serverEtaSeconds = Number.isFinite(serverEtaRaw) && serverEtaRaw > 0
+      ? serverEtaRaw
+      : null;
     const prev = activeSampleRef.current;
     let speedBps = Number(metricsRef.current.speedBps || 0);
 
@@ -176,6 +182,12 @@ export function useActiveJob(queueData: QueueData, apiBase: string) {
       speedBps = 0;
     }
 
+    if (status === 'downloading' && Number.isFinite(serverSpeedBps) && serverSpeedBps > 0) {
+      speedBps = speedBps > 0
+        ? (speedBps * 0.4) + (serverSpeedBps * 0.6)
+        : serverSpeedBps;
+    }
+
     activeSampleRef.current = {
       jobId: activeJobId,
       timeMs: now,
@@ -185,7 +197,16 @@ export function useActiveJob(queueData: QueueData, apiBase: string) {
 
     let etaSeconds: number | null = null;
     const progress = Number(job.progress || 0);
-    if (status === 'downloading' && speedBps > 1 && progress > 0 && progress < 100) {
+    if (status === 'downloading' && serverEtaSeconds != null) {
+      etaSeconds = serverEtaSeconds;
+    } else if (
+      status === 'downloading'
+      && speedBps > 1
+      && Number.isFinite(totalBytes)
+      && totalBytes > bytes
+    ) {
+      etaSeconds = (totalBytes - bytes) / speedBps;
+    } else if (status === 'downloading' && speedBps > 1 && progress > 0 && progress < 100) {
       const estimatedTotalBytes = bytes / (progress / 100);
       const remainingBytes = Math.max(0, estimatedTotalBytes - bytes);
       etaSeconds = remainingBytes / speedBps;

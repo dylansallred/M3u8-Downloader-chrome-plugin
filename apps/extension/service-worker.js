@@ -22,6 +22,15 @@ function sanitizeText(value, max = 255) {
   return value.trim().slice(0, max);
 }
 
+function cleanYoutubeTitleText(value, max = 255) {
+  return sanitizeText(String(value || ''), max)
+    .replace(/^\(\d+\)\s*/, '')
+    .replace(/^\[\d+\]\s*/, '')
+    .replace(/\s*[-|]\s*youtube\s*$/i, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function sanitizeRequestHeaders(headers) {
   if (!headers || typeof headers !== 'object') return {};
   const blocked = new Set([
@@ -130,6 +139,55 @@ function sanitizeResourceSignals(value) {
   }
 
   return output;
+}
+
+function sanitizeYoutubeMetadata(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+
+  const videoId = sanitizeText(value.videoId, 32);
+  const title = cleanYoutubeTitleText(value.title, 255);
+  const channelName = sanitizeText(value.channelName, 180);
+  const channelUrl = sanitizeText(value.channelUrl, 4096);
+  const channelId = sanitizeText(value.channelId, 80);
+  const uploadDate = sanitizeText(value.uploadDate, 64);
+  const thumbnailUrl = sanitizeText(value.thumbnailUrl, 4096);
+  const description = sanitizeText(value.description, 800);
+  const durationSecondsRaw = Number(value.durationSeconds);
+  const durationSeconds = Number.isFinite(durationSecondsRaw) && durationSecondsRaw > 0
+    ? Math.min(24 * 60 * 60, Math.floor(durationSecondsRaw))
+    : null;
+  const viewCountRaw = Number(value.viewCount);
+  const viewCount = Number.isFinite(viewCountRaw) && viewCountRaw > 0
+    ? Math.min(9_999_999_999_999, Math.floor(viewCountRaw))
+    : null;
+
+  if (
+    !videoId
+    && !title
+    && !channelName
+    && !channelUrl
+    && !channelId
+    && !uploadDate
+    && !thumbnailUrl
+    && !description
+    && !durationSeconds
+    && !viewCount
+  ) {
+    return null;
+  }
+
+  return {
+    videoId: videoId || '',
+    title: title || '',
+    channelName: channelName || '',
+    channelUrl: channelUrl || '',
+    channelId: channelId || '',
+    uploadDate: uploadDate || '',
+    thumbnailUrl: thumbnailUrl || '',
+    description: description || '',
+    durationSeconds,
+    viewCount,
+  };
 }
 
 function extractFilenameFromUrl(rawUrl) {
@@ -321,6 +379,7 @@ async function normalizeMedia(item = {}) {
     pageTitleCandidates: sanitizePageTitleCandidates(item.pageTitleCandidates),
     resourceSignals: sanitizeResourceSignals(item.resourceSignals),
     pageEpisodeHint: sanitizePageEpisodeHint(item.pageEpisodeHint),
+    youtubeMetadata: sanitizeYoutubeMetadata(item.youtubeMetadata),
     pageIsTvContext: Boolean(item.pageIsTvContext),
     pageContextCollectedAt: Number(item.pageContextCollectedAt || 0) || null,
     fallbackUrl: fallbackUrl || (item.fallbackUrl || ''),
@@ -329,6 +388,126 @@ async function normalizeMedia(item = {}) {
 
 function isLikelySegmentUrl(url) {
   return /\.(ts|m4s)(\?|$)/i.test(String(url || ''));
+}
+
+function normalizeYoutubeVideoId(value) {
+  const candidate = String(value || '').trim();
+  if (!/^[A-Za-z0-9_-]{6,20}$/.test(candidate)) {
+    return '';
+  }
+  return candidate;
+}
+
+function isYoutubeHost(hostname) {
+  const host = String(hostname || '').trim().toLowerCase();
+  return host === 'youtu.be'
+    || host.endsWith('.youtu.be')
+    || host === 'youtube.com'
+    || host.endsWith('.youtube.com');
+}
+
+function parseYoutubeVideoFromUrl(rawUrl) {
+  try {
+    const parsed = new URL(String(rawUrl || '').trim());
+    if (!isYoutubeHost(parsed.hostname)) {
+      return null;
+    }
+
+    const host = parsed.hostname.toLowerCase();
+    const pathParts = String(parsed.pathname || '').split('/').filter(Boolean);
+    let videoId = '';
+    let pageType = 'watch';
+
+    if (host === 'youtu.be' || host.endsWith('.youtu.be')) {
+      videoId = normalizeYoutubeVideoId(pathParts[0] || '');
+      pageType = 'short-link';
+    } else {
+      const firstPart = String(pathParts[0] || '').toLowerCase();
+      if (firstPart === 'watch') {
+        videoId = normalizeYoutubeVideoId(parsed.searchParams.get('v') || '');
+        pageType = 'watch';
+      } else if (firstPart === 'shorts' || firstPart === 'live' || firstPart === 'embed') {
+        videoId = normalizeYoutubeVideoId(pathParts[1] || '');
+        pageType = firstPart;
+      }
+    }
+
+    if (!videoId) {
+      return null;
+    }
+
+    return {
+      videoId,
+      pageType,
+      canonicalUrl: `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function createYoutubePageMedia(tabId, tabUrl, tabTitle) {
+  const detection = parseYoutubeVideoFromUrl(tabUrl);
+  if (!detection) {
+    return null;
+  }
+
+  const sourcePageUrl = sanitizeText(tabUrl, 4096);
+  const sourcePageTitle = sanitizeText(tabTitle, 255);
+  const cleanedTitle = cleanYoutubeTitleText(sourcePageTitle, 255);
+
+  return {
+    id: `youtube-${tabId}-${detection.videoId}`,
+    url: detection.canonicalUrl,
+    method: 'PAGE_URL',
+    statusCode: 200,
+    contentType: 'video/youtube',
+    contentLength: 0,
+    contentDisposition: '',
+    filename: `${detection.videoId}.youtube`,
+    requestHeaders: {},
+    detectedAt: Date.now(),
+    type: 'file',
+    streamType: null,
+    mediaKind: 'youtube-page',
+    matchedBy: ['tab-url-youtube'],
+    sourcePageTitle,
+    sourcePageUrl: sourcePageUrl || detection.canonicalUrl,
+    pageTitleCandidates: sourcePageTitle
+      ? [{ source: 'tab.title', value: sourcePageTitle, normalized: sourcePageTitle }]
+      : [],
+    resourceSignals: [],
+    pageEpisodeHint: null,
+    youtubeMetadata: {
+      videoId: detection.videoId,
+      title: cleanedTitle,
+      channelName: '',
+      channelUrl: '',
+      channelId: '',
+      uploadDate: '',
+      thumbnailUrl: '',
+      description: '',
+      durationSeconds: null,
+      viewCount: null,
+    },
+    pageIsTvContext: false,
+    pageContextCollectedAt: Date.now(),
+    fallbackUrl: '',
+  };
+}
+
+async function detectYoutubePageForTab(tabId, tabUrl, tabTitle = '') {
+  const safeTabId = Number(tabId);
+  if (!Number.isFinite(safeTabId) || safeTabId <= 0) {
+    return { ok: false, error: 'Invalid tab id' };
+  }
+
+  const media = createYoutubePageMedia(safeTabId, tabUrl, tabTitle);
+  if (!media) {
+    return { ok: true, ignored: true };
+  }
+
+  return storeMedia(safeTabId, media);
 }
 
 function isDirectFallbackCandidate(item) {
@@ -373,6 +552,85 @@ function attachFallbackUrls(items) {
   });
 }
 
+function mergeStringField(currentValue, nextValue) {
+  const current = String(currentValue || '').trim();
+  const next = String(nextValue || '').trim();
+  if (!next) return current;
+  if (!current) return next;
+  return next.length >= current.length ? next : current;
+}
+
+function mergeArrayField(currentValue, nextValue) {
+  const current = Array.isArray(currentValue) ? currentValue : [];
+  const next = Array.isArray(nextValue) ? nextValue : [];
+  if (next.length === 0) return current;
+  if (current.length === 0) return next;
+  return next.length >= current.length ? next : current;
+}
+
+function mergeObjectField(currentValue, nextValue) {
+  const current = currentValue && typeof currentValue === 'object' ? currentValue : null;
+  const next = nextValue && typeof nextValue === 'object' ? nextValue : null;
+  if (!next) return current;
+  if (!current) return next;
+
+  const merged = { ...current };
+  for (const [key, value] of Object.entries(next)) {
+    if (value == null || value === '') continue;
+    merged[key] = value;
+  }
+  return merged;
+}
+
+function mergeMediaItems(existingItem, incomingItem) {
+  const existing = existingItem && typeof existingItem === 'object' ? existingItem : {};
+  const incoming = incomingItem && typeof incomingItem === 'object' ? incomingItem : {};
+
+  const mergedMatchedBy = Array.from(new Set([
+    ...(Array.isArray(existing.matchedBy) ? existing.matchedBy : []),
+    ...(Array.isArray(incoming.matchedBy) ? incoming.matchedBy : []),
+  ]));
+
+  const mergedMediaKind = mergeStringField(existing.mediaKind, incoming.mediaKind);
+  const isYoutubePage = String(mergedMediaKind || '').toLowerCase() === 'youtube-page';
+
+  return {
+    ...existing,
+    ...incoming,
+    id: mergeStringField(existing.id, incoming.id) || existing.id || incoming.id || '',
+    url: mergeStringField(existing.url, incoming.url) || '',
+    filename: mergeStringField(existing.filename, incoming.filename),
+    sourcePageTitle: mergeStringField(existing.sourcePageTitle, incoming.sourcePageTitle),
+    sourcePageUrl: mergeStringField(existing.sourcePageUrl, incoming.sourcePageUrl),
+    contentType: mergeStringField(existing.contentType, incoming.contentType),
+    method: mergeStringField(existing.method, incoming.method),
+    mediaKind: mergedMediaKind,
+    streamType: mergeStringField(existing.streamType, incoming.streamType),
+    fallbackUrl: mergeStringField(existing.fallbackUrl, incoming.fallbackUrl),
+    matchedBy: mergedMatchedBy,
+    pageTitleCandidates: mergeArrayField(existing.pageTitleCandidates, incoming.pageTitleCandidates),
+    resourceSignals: isYoutubePage ? [] : mergeArrayField(existing.resourceSignals, incoming.resourceSignals),
+    pageEpisodeHint: isYoutubePage ? null : mergeObjectField(existing.pageEpisodeHint, incoming.pageEpisodeHint),
+    youtubeMetadata: mergeObjectField(existing.youtubeMetadata, incoming.youtubeMetadata),
+    pageIsTvContext: isYoutubePage ? false : Boolean(existing.pageIsTvContext || incoming.pageIsTvContext),
+    pageContextCollectedAt: Math.max(
+      Number(existing.pageContextCollectedAt || 0) || 0,
+      Number(incoming.pageContextCollectedAt || 0) || 0,
+    ) || null,
+    detectedAt: (() => {
+      const existingDetectedAt = Number(existing.detectedAt || 0) || 0;
+      const incomingDetectedAt = Number(incoming.detectedAt || 0) || 0;
+      if (!existingDetectedAt) return incomingDetectedAt || Date.now();
+      if (!incomingDetectedAt) return existingDetectedAt;
+      return Math.min(existingDetectedAt, incomingDetectedAt);
+    })(),
+    contentLength: Math.max(
+      Number(existing.contentLength || 0) || 0,
+      Number(incoming.contentLength || 0) || 0,
+    ) || 0,
+  };
+}
+
 function setBadge(tabId, count) {
   const text = count > 0 ? String(count) : '';
   chrome.action.setBadgeBackgroundColor({ color: '#2563eb', tabId });
@@ -385,7 +643,10 @@ async function storeMedia(tabId, media) {
   const current = await chrome.storage.local.get([key]);
   const existing = Array.isArray(current[key]) ? current[key] : [];
 
-  if (existing.some((x) => x.url === media.url)) {
+  const duplicateIndex = existing.findIndex((x) => x && x.url === media.url);
+  if (duplicateIndex >= 0) {
+    existing[duplicateIndex] = mergeMediaItems(existing[duplicateIndex], media);
+    await chrome.storage.local.set({ [key]: existing });
     setBadge(tabId, existing.length);
     return { ok: true, duplicate: true, count: existing.length };
   }
@@ -524,6 +785,32 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (cmd === 'SYNC_TAB_URL_MEDIA') {
+    const tabId = Number(message.tabId || (sender.tab && sender.tab.id) || 0);
+    const tabUrl = sanitizeText(
+      message.tabUrl
+      || (sender.tab && sender.tab.url)
+      || '',
+      4096
+    );
+    const tabTitle = sanitizeText(
+      message.tabTitle
+      || (sender.tab && sender.tab.title)
+      || '',
+      255
+    );
+
+    if (!tabId || !tabUrl) {
+      sendResponse({ ok: false, error: 'Missing tab id or tab url' });
+      return true;
+    }
+
+    detectYoutubePageForTab(tabId, tabUrl, tabTitle)
+      .then(sendResponse)
+      .catch((err) => sendResponse({ ok: false, error: err.message || String(err) }));
+    return true;
+  }
+
   if (cmd === 'CLEAR_TAB_MEDIA') {
     const tabId = message.tabId;
     if (!tabId) {
@@ -576,6 +863,29 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   return false;
+});
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  if (!changeInfo || (!changeInfo.url && changeInfo.status !== 'complete')) return;
+  const nextUrl = sanitizeText(changeInfo && changeInfo.url ? changeInfo.url : (tab && tab.url) || '', 4096);
+  if (!nextUrl) return;
+
+  const nextTitle = sanitizeText((tab && tab.title) || '', 255);
+  detectYoutubePageForTab(tabId, nextUrl, nextTitle).catch(() => {});
+});
+
+chrome.tabs.onActivated.addListener((activeInfo) => {
+  const tabId = Number(activeInfo && activeInfo.tabId);
+  if (!Number.isFinite(tabId) || tabId <= 0) return;
+
+  chrome.tabs.get(tabId)
+    .then((tab) => {
+      const url = sanitizeText(tab && tab.url || '', 4096);
+      if (!url) return;
+      const title = sanitizeText(tab && tab.title || '', 255);
+      return detectYoutubePageForTab(tabId, url, title);
+    })
+    .catch(() => {});
 });
 
 chrome.tabs.onRemoved.addListener((tabId) => {
