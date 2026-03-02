@@ -1,0 +1,485 @@
+const fs = require('fs');
+const path = require('path');
+const { buildDownloadAssetUrl, normalizeRelativePath, toPosixPath } = require('../utils/downloadPaths');
+
+const INDEX_VERSION = 2;
+const DEFAULT_LIMIT = 200;
+const HISTORY_MEDIA_EXTENSIONS = new Set([
+  '.mp4',
+  '.ts',
+  '.mkv',
+  '.mov',
+  '.webm',
+  '.m4v',
+  '.avi',
+]);
+
+const TERMINAL_STATUSES = new Set(['completed', 'completed-with-errors', 'failed', 'cancelled']);
+
+function isVideoHistoryFile(fileName) {
+  const ext = path.extname(fileName).toLowerCase();
+  return HISTORY_MEDIA_EXTENSIONS.has(ext);
+}
+
+function isValidHistoryJobId(jobIdPrefix) {
+  return /^[a-z0-9]+(?:-[a-z0-9]+)?$/i.test(jobIdPrefix) && jobIdPrefix.length <= 80;
+}
+
+function extractHistoryJobId(fileName) {
+  const name = String(fileName || '').trim().replace(/[.]part$/i, '');
+  if (!name) return null;
+
+  const modernMatch = name.match(/^([a-z0-9]+-[a-z0-9]+)-/i);
+  if (modernMatch) {
+    return modernMatch[1];
+  }
+
+  const legacyMatch = name.match(/^([a-z0-9]+)-/i);
+  if (legacyMatch) {
+    return legacyMatch[1];
+  }
+
+  return null;
+}
+
+function deriveLabel(fileName) {
+  const dashIndex = fileName.indexOf('-');
+  if (dashIndex > 0 && dashIndex < fileName.length - 1) {
+    return fileName.slice(dashIndex + 1);
+  }
+  return fileName;
+}
+
+function safeParsePositiveInt(value, fallback, { min = 1, max = 1000 } = {}) {
+  const parsed = Number.parseInt(String(value || ''), 10);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(max, Math.max(min, parsed));
+}
+
+function encodeCursor(offset) {
+  return Buffer.from(String(offset), 'utf8').toString('base64url');
+}
+
+function decodeCursor(cursor) {
+  if (!cursor) return 0;
+  try {
+    const decoded = Buffer.from(String(cursor), 'base64url').toString('utf8');
+    const offset = Number.parseInt(decoded, 10);
+    if (!Number.isFinite(offset) || offset < 0) return 0;
+    return offset;
+  } catch {
+    return 0;
+  }
+}
+
+function normalizeStoredItem(item) {
+  if (!item || typeof item.fileName !== 'string') return null;
+  const rawRelativePath = item.relativePath || item.fileName;
+  const safeRelativePath = normalizeRelativePath(rawRelativePath);
+  if (!safeRelativePath) return null;
+  return {
+    ...item,
+    id: safeRelativePath,
+    fileName: path.basename(item.fileName),
+    relativePath: safeRelativePath,
+  };
+}
+
+class HistoryIndexService {
+  constructor(options = {}) {
+    const {
+      downloadDir,
+      fsPromises,
+      jobs,
+      onChange,
+      minRefreshIntervalMs = 1_000,
+    } = options;
+
+    if (!downloadDir) {
+      throw new Error('HistoryIndexService requires downloadDir');
+    }
+    if (!fsPromises) {
+      throw new Error('HistoryIndexService requires fsPromises');
+    }
+
+    this.downloadDir = downloadDir;
+    this.fsPromises = fsPromises;
+    this.jobs = jobs || new Map();
+    this.onChange = typeof onChange === 'function' ? onChange : null;
+    this.minRefreshIntervalMs = Math.max(1_000, Number(minRefreshIntervalMs) || 5_000);
+    this.indexFilePath = path.join(downloadDir, 'history-index.json');
+    this.items = [];
+    this.lastRefreshAt = 0;
+    this.lastSavedAt = 0;
+    this.refreshInFlight = null;
+  }
+
+  async init() {
+    await this.fsPromises.mkdir(this.downloadDir, { recursive: true });
+    await this.loadPersistedIndex();
+    await this.refreshFromDisk({ force: true });
+  }
+
+  async loadPersistedIndex() {
+    try {
+      const raw = await this.fsPromises.readFile(this.indexFilePath, 'utf8');
+      const parsed = JSON.parse(raw);
+      if (
+        parsed
+        && (parsed.version === INDEX_VERSION || parsed.version === 1)
+        && Array.isArray(parsed.items)
+      ) {
+        this.items = parsed.items
+          .map(normalizeStoredItem)
+          .filter(Boolean)
+          .sort((a, b) => Number(b.modifiedAt || 0) - Number(a.modifiedAt || 0));
+      } else {
+        this.items = [];
+      }
+    } catch {
+      this.items = [];
+    }
+  }
+
+  async persistIndex() {
+    const payload = {
+      version: INDEX_VERSION,
+      updatedAt: Date.now(),
+      items: this.items,
+    };
+    const tempPath = `${this.indexFilePath}.tmp`;
+    await this.fsPromises.writeFile(tempPath, JSON.stringify(payload, null, 2), 'utf8');
+    await this.fsPromises.rename(tempPath, this.indexFilePath);
+    this.lastSavedAt = Date.now();
+  }
+
+  toRelativePath(absolutePath) {
+    if (typeof absolutePath !== 'string' || !absolutePath.trim()) return null;
+    const rel = path.relative(this.downloadDir, absolutePath);
+    if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) return null;
+    return toPosixPath(rel);
+  }
+
+  buildActiveJobFiles() {
+    const activeFiles = new Set();
+    if (!this.jobs || typeof this.jobs.values !== 'function') {
+      return activeFiles;
+    }
+
+    for (const job of this.jobs.values()) {
+      if (!job) continue;
+      const status = String(job.status || job.queueStatus || '');
+      if (TERMINAL_STATUSES.has(status)) continue;
+
+      if (job.filePath) {
+        const rel = this.toRelativePath(job.filePath);
+        if (rel) {
+          activeFiles.add(rel);
+          activeFiles.add(path.basename(rel));
+        }
+      }
+      if (job.mp4Path) {
+        const rel = this.toRelativePath(job.mp4Path);
+        if (rel) {
+          activeFiles.add(rel);
+          activeFiles.add(path.basename(rel));
+        }
+      }
+    }
+    return activeFiles;
+  }
+
+  buildJobLookup() {
+    const byFile = new Map();
+    if (!this.jobs || typeof this.jobs.values !== 'function') {
+      return byFile;
+    }
+
+    for (const job of this.jobs.values()) {
+      if (!job) continue;
+      if (job.filePath) {
+        const rel = this.toRelativePath(job.filePath);
+        if (rel) {
+          byFile.set(rel, job);
+          byFile.set(path.basename(rel), job);
+        }
+      }
+      if (job.mp4Path) {
+        const rel = this.toRelativePath(job.mp4Path);
+        if (rel) {
+          byFile.set(rel, job);
+          byFile.set(path.basename(rel), job);
+        }
+      }
+    }
+    return byFile;
+  }
+
+  async walkMediaFiles(currentDir = this.downloadDir, relativeDir = '') {
+    const entries = await this.fsPromises.readdir(currentDir, { withFileTypes: true });
+    const files = [];
+
+    for (const entry of entries) {
+      if (!entry) continue;
+      const childRelative = relativeDir ? `${relativeDir}/${entry.name}` : entry.name;
+      const fullPath = path.join(currentDir, entry.name);
+
+      if (entry.isDirectory()) {
+        if (!relativeDir && entry.name.startsWith('temp-')) {
+          continue;
+        }
+        const nested = await this.walkMediaFiles(fullPath, childRelative);
+        files.push(...nested);
+        continue;
+      }
+
+      if (!entry.isFile()) continue;
+      if (!isVideoHistoryFile(entry.name)) continue;
+
+      let stat = null;
+      try {
+        stat = await this.fsPromises.stat(fullPath);
+      } catch {
+        stat = null;
+      }
+      if (!stat) continue;
+
+      files.push({
+        fullPath,
+        relativePath: childRelative,
+        fileName: entry.name,
+        dirRelative: relativeDir,
+        stat,
+      });
+    }
+
+    return files;
+  }
+
+  findThumbnailUrl({ validJobId, dirAbsolute, dirRelative, job }) {
+    const localThumbCandidates = [];
+    if (validJobId) {
+      localThumbCandidates.push(`${validJobId}-thumb.jpg`);
+    }
+    if (job && typeof job.thumbnailPath === 'string' && job.thumbnailPath.trim()) {
+      localThumbCandidates.push(path.basename(job.thumbnailPath));
+    }
+
+    for (const thumbName of localThumbCandidates) {
+      const sameDirPath = path.join(dirAbsolute, thumbName);
+      if (fs.existsSync(sameDirPath)) {
+        const thumbRelative = dirRelative ? `${dirRelative}/${thumbName}` : thumbName;
+        return `/downloads/${toPosixPath(thumbRelative)}`;
+      }
+
+      const legacyPath = path.join(this.downloadDir, thumbName);
+      if (fs.existsSync(legacyPath)) {
+        return `/downloads/${thumbName}`;
+      }
+    }
+
+    if (job && Array.isArray(job.thumbnailPaths)) {
+      for (const thumbPath of job.thumbnailPaths) {
+        if (typeof thumbPath !== 'string') continue;
+        if (!fs.existsSync(thumbPath)) continue;
+        const url = buildDownloadAssetUrl(this.downloadDir, thumbPath);
+        if (url) return url;
+      }
+    }
+
+    if (
+      job
+      && Array.isArray(job.thumbnailUrls)
+      && job.thumbnailUrls.length > 0
+      && typeof job.thumbnailUrls[0] === 'string'
+    ) {
+      return job.thumbnailUrls[0];
+    }
+
+    return null;
+  }
+
+  buildItem(mediaFile, filesByDir, activeJobFiles, jobLookup) {
+    const fileName = mediaFile.fileName;
+    const relativePath = toPosixPath(mediaFile.relativePath);
+    const ext = path.extname(fileName).toLowerCase();
+    const dirRelative = mediaFile.dirRelative || '';
+    const dirAbsolute = path.dirname(mediaFile.fullPath);
+
+    if (ext === '.ts') {
+      const mp4Variant = fileName.replace(/\.ts$/i, '.mp4');
+      const siblingNames = filesByDir.get(dirRelative) || new Set();
+      if (siblingNames.has(mp4Variant)) return null;
+      if (activeJobFiles.has(relativePath) || activeJobFiles.has(fileName)) return null;
+    }
+
+    const job = jobLookup.get(relativePath) || jobLookup.get(fileName) || null;
+    const extractedJobId = extractHistoryJobId(fileName);
+    const validJobId = extractedJobId && isValidHistoryJobId(extractedJobId)
+      ? extractedJobId
+      : null;
+
+    const thumbnailUrl = this.findThumbnailUrl({
+      validJobId,
+      dirAbsolute,
+      dirRelative,
+      job,
+    });
+
+    return {
+      id: relativePath,
+      fileName,
+      relativePath,
+      label: deriveLabel(fileName),
+      jobId: validJobId,
+      title: (job && job.title) || null,
+      sizeBytes: Number(mediaFile.stat.size || 0),
+      modifiedAt: Number(mediaFile.stat.mtimeMs || Date.now()),
+      ext,
+      thumbnailUrl,
+      tmdbReleaseDate: (job && job.tmdbReleaseDate) || null,
+      tmdbMetadata: (job && job.tmdbMetadata) || null,
+    };
+  }
+
+  static buildSignature(items) {
+    return items
+      .map((item) => `${item.relativePath || item.fileName}:${item.sizeBytes}:${item.modifiedAt}`)
+      .join('|');
+  }
+
+  async refreshFromDisk(options = {}) {
+    const force = Boolean(options.force);
+    const now = Date.now();
+    if (!force && now - this.lastRefreshAt < this.minRefreshIntervalMs) {
+      return { changed: false, reason: 'throttled' };
+    }
+
+    if (this.refreshInFlight) {
+      return this.refreshInFlight;
+    }
+
+    this.refreshInFlight = (async () => {
+      this.lastRefreshAt = Date.now();
+
+      const mediaFiles = await this.walkMediaFiles();
+      const filesByDir = new Map();
+      for (const mediaFile of mediaFiles) {
+        const key = mediaFile.dirRelative || '';
+        if (!filesByDir.has(key)) {
+          filesByDir.set(key, new Set());
+        }
+        filesByDir.get(key).add(mediaFile.fileName);
+      }
+
+      const activeJobFiles = this.buildActiveJobFiles();
+      const jobLookup = this.buildJobLookup();
+
+      const nextItems = [];
+      for (const mediaFile of mediaFiles) {
+        const item = this.buildItem(mediaFile, filesByDir, activeJobFiles, jobLookup);
+        if (item) nextItems.push(item);
+      }
+
+      nextItems.sort((a, b) => Number(b.modifiedAt || 0) - Number(a.modifiedAt || 0));
+
+      const currentSignature = HistoryIndexService.buildSignature(this.items);
+      const nextSignature = HistoryIndexService.buildSignature(nextItems);
+
+      if (currentSignature === nextSignature) {
+        return { changed: false, reason: 'unchanged' };
+      }
+
+      this.items = nextItems;
+      await this.persistIndex();
+      this.emitChange('refresh');
+      return { changed: true };
+    })().finally(() => {
+      this.refreshInFlight = null;
+    });
+
+    return this.refreshInFlight;
+  }
+
+  emitChange(reason) {
+    if (!this.onChange) return;
+    try {
+      this.onChange({
+        reason,
+        changedAt: Date.now(),
+        total: this.items.length,
+      });
+    } catch {
+      // Ignore observer failures.
+    }
+  }
+
+  async list(options = {}) {
+    await this.refreshFromDisk({ force: this.items.length === 0 });
+
+    const limit = safeParsePositiveInt(options.limit, DEFAULT_LIMIT, { min: 1, max: 1_000 });
+    const offset = decodeCursor(options.cursor);
+    const nextOffset = offset + limit;
+    const slice = this.items.slice(offset, nextOffset);
+    const nextCursor = nextOffset < this.items.length ? encodeCursor(nextOffset) : null;
+
+    return {
+      items: slice,
+      total: this.items.length,
+      nextCursor,
+    };
+  }
+
+  findByFileName(fileName) {
+    const safeName = path.basename(String(fileName || ''));
+    if (!safeName) return null;
+    return this.items.find((item) => item.fileName === safeName) || null;
+  }
+
+  resolveFilePath(fileName) {
+    const item = this.findByFileName(fileName);
+    if (!item) return null;
+    const safeRelative = normalizeRelativePath(item.relativePath || item.fileName);
+    if (!safeRelative) return null;
+    const resolved = path.resolve(this.downloadDir, safeRelative);
+    const relative = path.relative(this.downloadDir, resolved);
+    if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) return null;
+    return resolved;
+  }
+
+  async removeByFileName(fileName) {
+    const safeName = path.basename(String(fileName || ''));
+    if (!safeName) return false;
+    const before = this.items.length;
+    this.items = this.items.filter((item) => item.fileName !== safeName);
+    if (this.items.length === before) return false;
+    await this.persistIndex();
+    this.emitChange('delete');
+    return true;
+  }
+
+  async removeByFileNames(fileNames) {
+    if (!Array.isArray(fileNames) || fileNames.length === 0) return 0;
+    const safeNames = new Set(fileNames.map((name) => path.basename(String(name || ''))).filter(Boolean));
+    if (safeNames.size === 0) return 0;
+    const before = this.items.length;
+    this.items = this.items.filter((item) => !safeNames.has(item.fileName));
+    const removed = before - this.items.length;
+    if (removed > 0) {
+      await this.persistIndex();
+      this.emitChange('delete-many');
+    }
+    return removed;
+  }
+
+  async clear() {
+    if (this.items.length === 0) return;
+    this.items = [];
+    await this.persistIndex();
+    this.emitChange('clear');
+  }
+}
+
+module.exports = {
+  HistoryIndexService,
+};

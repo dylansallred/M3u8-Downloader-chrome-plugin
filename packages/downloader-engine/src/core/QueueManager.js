@@ -10,6 +10,7 @@ class QueueManager {
       jobs,
       runJob,
       runDirectJob,
+      initialSettings,
       maxPersistedJobs = 200,
       completedRetentionMs = 7 * 24 * 60 * 60 * 1000,
     } = options || {};
@@ -31,9 +32,12 @@ class QueueManager {
     this.settings = {
       maxConcurrent: 1, // Number of simultaneous downloads (1-16)
       autoStart: true,  // Automatically start next queued job
+      ...(initialSettings || {}),
     };
+    this.hasPersistedSettings = false;
     this.activeJobs = new Set(); // Set of currently downloading job IDs
     this.queueFilePath = queueFilePath;
+    this.downloadDir = path.dirname(queueFilePath);
     this.maxPersistedJobs = maxPersistedJobs;
     this.completedRetentionMs = completedRetentionMs;
     this.fsPromises = fsPromises;
@@ -56,10 +60,19 @@ class QueueManager {
       const data = await this.fsPromises.readFile(this.queueFilePath, 'utf8');
       const parsed = JSON.parse(data);
       this.queue = Array.isArray(parsed.queue) ? parsed.queue : [];
-      this.settings = { ...this.settings, ...(parsed.settings || {}) };
+      const persistedSettings = parsed.settings && typeof parsed.settings === 'object'
+        ? parsed.settings
+        : null;
+      if (persistedSettings) {
+        this.settings = { ...this.settings, ...persistedSettings };
+        this.hasPersistedSettings = true;
+      }
 
       // Restore jobs to the jobs Map and reset states for recovery
       this.queue.forEach((queuedJob) => {
+        if (!queuedJob.storageDir && queuedJob.filePath) {
+          queuedJob.storageDir = path.dirname(queuedJob.filePath);
+        }
         if (queuedJob.queueStatus === 'downloading') {
           // Reset downloading jobs to queued on server restart
           queuedJob.queueStatus = 'queued';
@@ -73,6 +86,10 @@ class QueueManager {
       this.pruneQueueForPersistence();
 
       logger.info('Loaded jobs from queue file', { count: this.queue.length });
+
+      if (this.settings.autoStart) {
+        this.processQueue();
+      }
     } catch (err) {
       logger.warn('Failed to load queue from disk', { error: err.message });
       this.queue = [];
@@ -92,6 +109,7 @@ class QueueManager {
           headers,
           filePath,
           mp4Path,
+          storageDir,
           downloadName,
           downloadNameMp4,
           bytesDownloaded,
@@ -123,6 +141,7 @@ class QueueManager {
           headers,
           filePath,
           mp4Path,
+          storageDir,
           downloadName,
           downloadNameMp4,
           bytesDownloaded,
@@ -228,36 +247,64 @@ class QueueManager {
   }
 
   buildThumbnailUrls(job) {
+    const toDownloadUrl = (candidatePath) => {
+      if (typeof candidatePath !== 'string' || !candidatePath.trim()) {
+        return null;
+      }
+
+      const resolvedRoot = path.resolve(this.downloadDir);
+      const resolvedPath = path.resolve(candidatePath);
+      const relative = path.relative(resolvedRoot, resolvedPath);
+
+      if (!relative.startsWith('..') && !path.isAbsolute(relative)) {
+        return `/downloads/${relative.replace(/\\/g, '/')}`;
+      }
+
+      return `/downloads/${path.basename(candidatePath)}`;
+    };
+
     const localThumbs = Array.isArray(job.thumbnailPaths)
-      ? job.thumbnailPaths.filter(p => fs.existsSync(p)).map(p => `/downloads/${path.basename(p)}`)
+      ? job.thumbnailPaths
+        .filter((p) => fs.existsSync(p))
+        .map((p) => toDownloadUrl(p))
+        .filter(Boolean)
       : (job.thumbnailPath && fs.existsSync(job.thumbnailPath)
-          ? [`/downloads/${path.basename(job.thumbnailPath)}`]
+          ? [toDownloadUrl(job.thumbnailPath)].filter(Boolean)
           : []);
 
     const remoteThumbs = Array.isArray(job.thumbnailUrls)
       ? job.thumbnailUrls.filter(u => typeof u === 'string' && u.startsWith('http'))
       : [];
 
-    return [...remoteThumbs, ...localThumbs];
+    return [...localThumbs, ...remoteThumbs];
   }
 
   // Process queue - start next job if we have capacity
   processQueue() {
-    const activeCount = this.getActiveCount();
+    if (!this.settings.autoStart) return;
 
-    // Check if we can start more jobs
-    if (activeCount >= this.settings.maxConcurrent) {
-      return;
+    const attemptedJobIds = new Set();
+    const maxIterations = Math.max(1, this.queue.length * 2);
+    let iterations = 0;
+
+    while (this.getActiveCount() < this.settings.maxConcurrent && iterations < maxIterations) {
+      iterations += 1;
+
+      const nextJob = this.queue.find((job) =>
+        job
+        && job.queueStatus === 'queued'
+        && !attemptedJobIds.has(job.id)
+      );
+      if (!nextJob) {
+        break;
+      }
+
+      attemptedJobIds.add(nextJob.id);
+      const started = this.startJob(nextJob.id);
+      if (!started) {
+        continue;
+      }
     }
-
-    // Find next queued job
-    const nextJob = this.queue.find(job => job.queueStatus === 'queued');
-    if (!nextJob) {
-      return;
-    }
-
-    // Start the job
-    this.startJob(nextJob.id);
   }
 
   // Count active jobs that are actually downloading/fetching
@@ -441,30 +488,84 @@ class QueueManager {
     // Cancel if currently downloading
     if (job.queueStatus === 'downloading') {
       job.cancelled = true;
+      // Ensure in-flight job processors cleanup partial artifacts before exiting.
+      job.cleanupOnCancel = true;
       this.activeJobs.delete(jobId);
     }
 
     // Delete files if requested
     if (deleteFiles) {
       try {
-        if (job.filePath && fs.existsSync(job.filePath)) {
-          fs.unlinkSync(job.filePath);
+        job.cleanupOnCancel = true;
+        const filesToDelete = new Set();
+        const addFile = (filePath) => {
+          if (typeof filePath === 'string' && filePath.trim()) {
+            filesToDelete.add(filePath);
+          }
+        };
+
+        addFile(job.filePath);
+        addFile(job.mp4Path);
+        addFile(job.thumbnailPath);
+        addFile(job.subtitlePath);
+        addFile(job.subtitleZipPath);
+
+        if (job.filePath) {
+          addFile(`${job.filePath}.part`);
         }
-        if (job.mp4Path && fs.existsSync(job.mp4Path)) {
-          fs.unlinkSync(job.mp4Path);
+        if (job.mp4Path) {
+          addFile(`${job.mp4Path}.part`);
         }
-        // Delete thumbnails
+
         if (Array.isArray(job.thumbnailPaths)) {
-          job.thumbnailPaths.forEach(p => {
-            if (fs.existsSync(p)) fs.unlinkSync(p);
-          });
+          job.thumbnailPaths.forEach((thumbPath) => addFile(thumbPath));
         }
-        // Delete subtitle files
-        if (job.subtitlePath && fs.existsSync(job.subtitlePath)) {
-          fs.unlinkSync(job.subtitlePath);
+
+        if (job.id && job.filePath) {
+          const downloadDir = path.dirname(job.filePath);
+          addFile(path.join(downloadDir, `${job.id}-thumb.jpg`));
+          addFile(path.join(downloadDir, `${job.id}-subtitles.srt`));
+          addFile(path.join(downloadDir, `${job.id}-subtitles.zip`));
+          addFile(path.join(downloadDir, `ts-parts-${job.id}.txt`));
         }
-        if (job.subtitleZipPath && fs.existsSync(job.subtitleZipPath)) {
-          fs.unlinkSync(job.subtitleZipPath);
+
+        filesToDelete.forEach((filePath) => {
+          if (fs.existsSync(filePath)) {
+            fs.unlinkSync(filePath);
+          }
+        });
+
+        const jobStorageDir = (() => {
+          if (typeof job.storageDir === 'string' && job.storageDir.trim()) {
+            return job.storageDir;
+          }
+          if (typeof job.filePath === 'string' && job.filePath.trim()) {
+            return path.dirname(job.filePath);
+          }
+          return null;
+        })();
+
+        if (
+          jobStorageDir
+          && fs.existsSync(jobStorageDir)
+          && path.resolve(path.dirname(jobStorageDir)) === path.resolve(this.downloadDir)
+          && path.basename(jobStorageDir) === String(job.id || '')
+        ) {
+          fs.rmSync(jobStorageDir, { recursive: true, force: true });
+        }
+
+        if (job.id) {
+          const queueDir = path.dirname(this.queueFilePath);
+          if (fs.existsSync(queueDir)) {
+            const entries = fs.readdirSync(queueDir, { withFileTypes: true });
+            entries
+              .filter((entry) => entry.isDirectory())
+              .filter((entry) => entry.name.startsWith('temp-') && entry.name.endsWith(`-${job.id}`))
+              .forEach((entry) => {
+                const tempPath = path.join(queueDir, entry.name);
+                fs.rmSync(tempPath, { recursive: true, force: true });
+              });
+          }
         }
       } catch (err) {
         console.warn(`Failed to delete files for job ${jobId}:`, err.message);
@@ -535,6 +636,28 @@ class QueueManager {
     }
 
     return this.settings;
+  }
+
+  applyLegacySettingsIfNeeded(legacySettings = {}) {
+    if (this.hasPersistedSettings) {
+      return { migrated: false, reason: 'persisted-settings-present' };
+    }
+
+    const next = {};
+    if (typeof legacySettings.maxConcurrent === 'number') {
+      next.maxConcurrent = legacySettings.maxConcurrent;
+    }
+    if (typeof legacySettings.autoStart === 'boolean') {
+      next.autoStart = legacySettings.autoStart;
+    }
+
+    if (Object.keys(next).length === 0) {
+      return { migrated: false, reason: 'no-legacy-settings' };
+    }
+
+    this.updateSettings(next);
+    this.hasPersistedSettings = true;
+    return { migrated: true, settings: this.getSettings() };
   }
 
   // Get queue settings

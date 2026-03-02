@@ -5,13 +5,21 @@ import { Switch } from '@/components/ui/switch';
 import { Button } from '@/components/ui/button';
 import { Eye, EyeOff } from 'lucide-react';
 import type { DesktopSettings } from '@/types/settings';
+import type { QueueSettings } from '@/types/queue';
 
 interface DesktopSettingsCardProps {
   settings: DesktopSettings;
+  queueSettings: QueueSettings;
   onSave: (next: Partial<DesktopSettings>) => void;
+  onSaveQueueSettings: (next: Partial<QueueSettings>) => void;
 }
 
-export function DesktopSettingsCard({ settings, onSave }: DesktopSettingsCardProps) {
+export function DesktopSettingsCard({
+  settings,
+  queueSettings,
+  onSave,
+  onSaveQueueSettings,
+}: DesktopSettingsCardProps) {
   const [showTmdbKey, setShowTmdbKey] = useState(false);
   const [showSubdlKey, setShowSubdlKey] = useState(false);
 
@@ -34,8 +42,8 @@ export function DesktopSettingsCard({ settings, onSave }: DesktopSettingsCardPro
             type="number"
             min={1}
             max={16}
-            value={settings.queueMaxConcurrent || 1}
-            onChange={(e) => onSave({ queueMaxConcurrent: Number(e.target.value) || 1 })}
+            value={queueSettings.maxConcurrent || 1}
+            onChange={(e) => onSaveQueueSettings({ maxConcurrent: Number(e.target.value) || 1 })}
             className="w-20 h-8 text-sm bg-background border-border"
           />
         </div>
@@ -56,8 +64,8 @@ export function DesktopSettingsCard({ settings, onSave }: DesktopSettingsCardPro
         <div className="flex items-center justify-between">
           <label className="text-sm text-foreground">Default auto start</label>
           <Switch
-            checked={settings.queueAutoStart !== false}
-            onCheckedChange={(checked) => onSave({ queueAutoStart: checked })}
+            checked={queueSettings.autoStart !== false}
+            onCheckedChange={(checked) => onSaveQueueSettings({ autoStart: checked })}
           />
         </div>
 

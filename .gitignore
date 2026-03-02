@@ -11,3 +11,4 @@ test-results/
 .conductor
 .context
 apps/extension/popup.css
+.eslintcache

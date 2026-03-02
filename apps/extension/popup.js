@@ -17,11 +17,162 @@ const emptyState = document.getElementById('emptyState');
 const refreshButton = document.getElementById('refreshButton');
 const clearButton = document.getElementById('clearButton');
 const statusDot = document.getElementById('statusDot');
+const toastRegion = document.getElementById('toastRegion');
 
 let activeTab = null;
 let health = null;
 let extensionInfo = null;
 let compatibilityIssue = null;
+const pendingSendKeys = new Set();
+const pendingStreamKeys = new Set();
+
+function showToast(message, variant = 'info', timeoutMs = 2600) {
+  const text = String(message || '').trim();
+  if (!text) return;
+  if (!toastRegion) return;
+
+  const palette = {
+    success: { bg: 'rgba(16, 185, 129, 0.18)', border: 'rgba(16, 185, 129, 0.45)', fg: '#ecfdf5' },
+    error: { bg: 'rgba(239, 68, 68, 0.18)', border: 'rgba(239, 68, 68, 0.45)', fg: '#fee2e2' },
+    warning: { bg: 'rgba(245, 158, 11, 0.18)', border: 'rgba(245, 158, 11, 0.45)', fg: '#fffbeb' },
+    info: { bg: 'rgba(59, 130, 246, 0.18)', border: 'rgba(59, 130, 246, 0.45)', fg: '#eff6ff' },
+  };
+  const style = palette[variant] || palette.info;
+
+  const toast = document.createElement('div');
+  toast.setAttribute('role', 'status');
+  toast.textContent = text;
+  toast.style.cssText = [
+    'padding: 8px 10px',
+    'border-radius: 10px',
+    'font-size: 12px',
+    'line-height: 1.3',
+    `background: ${style.bg}`,
+    `border: 1px solid ${style.border}`,
+    `color: ${style.fg}`,
+    'backdrop-filter: blur(8px)',
+    'box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2)',
+    'opacity: 0',
+    'transform: translateY(4px)',
+    'transition: opacity 140ms ease, transform 140ms ease',
+    'pointer-events: auto',
+  ].join(';');
+
+  toastRegion.appendChild(toast);
+  while (toastRegion.childElementCount > 4) {
+    toastRegion.firstElementChild?.remove();
+  }
+
+  requestAnimationFrame(() => {
+    toast.style.opacity = '1';
+    toast.style.transform = 'translateY(0)';
+  });
+
+  window.setTimeout(() => {
+    toast.style.opacity = '0';
+    toast.style.transform = 'translateY(4px)';
+    window.setTimeout(() => toast.remove(), 180);
+  }, Math.max(1200, Number(timeoutMs) || 2600));
+}
+
+function getSendKey(item) {
+  if (item && item.id) return String(item.id);
+  return String(item && item.url || '');
+}
+
+function setQueueButtonBusy(button, isBusy) {
+  if (!button) return;
+  if (isBusy) {
+    button.dataset.originalLabel = button.dataset.originalLabel || button.innerHTML;
+    button.disabled = true;
+    button.style.opacity = '0.8';
+    button.innerHTML = '<svg class="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M12 4v4m0 8v4m8-8h-4M8 12H4m13.657-5.657l-2.828 2.828M9.172 14.828l-2.829 2.829m0-11.314l2.829 2.828m8.485 8.486l-2.828-2.829"/></svg> Sending...';
+    return;
+  }
+
+  button.disabled = false;
+  button.style.opacity = '';
+  if (button.dataset.originalLabel) {
+    button.innerHTML = button.dataset.originalLabel;
+  }
+}
+
+function getStreamUrl(item) {
+  if (!item) return '';
+  return String(item.url || '').trim();
+}
+
+function getStreamFallbackUrl(item) {
+  if (!item) return '';
+  return String(item.fallbackUrl || '').trim();
+}
+
+function isHlsLikeUrl(url) {
+  return /\.m3u8(\?|$)/i.test(String(url || ''));
+}
+
+function buildStreamPlayerUrl(item) {
+  const src = getStreamUrl(item);
+  const fallback = getStreamFallbackUrl(item);
+  if (!src && !fallback) return '';
+
+  const params = new URLSearchParams();
+  if (src) params.set('src', src);
+  if (fallback && fallback !== src) params.set('fallback', fallback);
+
+  const mediaType = String(item?.type || (isHlsLikeUrl(src) ? 'hls' : 'file')).toLowerCase();
+  params.set('type', mediaType);
+
+  const title = String(getDisplayTitle(item) || item?.filename || 'Stream Preview').trim();
+  if (title) params.set('title', title);
+
+  return `${chrome.runtime.getURL('player.html')}?${params.toString()}`;
+}
+
+async function buildStreamPlayerUrlWithSession(item) {
+  const fallbackUrl = buildStreamPlayerUrl(item);
+  if (!fallbackUrl) return '';
+
+  try {
+    const response = await chrome.runtime.sendMessage({
+      cmd: 'CREATE_STREAM_SESSION',
+      session: {
+        src: getStreamUrl(item),
+        fallback: getStreamFallbackUrl(item),
+        declaredType: String(item?.type || (isHlsLikeUrl(getStreamUrl(item)) ? 'hls' : 'file')).toLowerCase(),
+        title: String(getDisplayTitle(item) || item?.filename || 'Stream Preview').trim(),
+        sourcePageUrl: String(item?.sourcePageUrl || (activeTab && activeTab.url) || '').trim(),
+        requestHeaders: item?.requestHeaders || {},
+      },
+    });
+
+    if (response && response.ok && response.sessionId) {
+      const sessionParam = encodeURIComponent(String(response.sessionId));
+      return `${chrome.runtime.getURL('player.html')}?session=${sessionParam}`;
+    }
+  } catch {
+    // fallback to URL params mode
+  }
+
+  return fallbackUrl;
+}
+
+function setStreamButtonBusy(button, isBusy) {
+  if (!button) return;
+  if (isBusy) {
+    button.dataset.originalLabel = button.dataset.originalLabel || button.innerHTML;
+    button.disabled = true;
+    button.style.opacity = '0.8';
+    button.innerHTML = '<svg class="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M12 4v4m0 8v4m8-8h-4M8 12H4m13.657-5.657l-2.828 2.828M9.172 14.828l-2.829 2.829m0-11.314l2.829 2.828m8.485 8.486l-2.828-2.829"/></svg>';
+    return;
+  }
+
+  button.disabled = false;
+  button.style.opacity = '';
+  if (button.dataset.originalLabel) {
+    button.innerHTML = button.dataset.originalLabel;
+  }
+}
 
 function setStatus(text, isError = false) {
   connectionStatus.textContent = text;
@@ -153,11 +304,20 @@ function buildJobPayload(item) {
   };
 }
 
-async function sendJob(item) {
-  if (compatibilityIssue) {
-    alert(`Update required before sending jobs: ${compatibilityIssue}`);
+async function sendJob(item, queueButton = null) {
+  const sendKey = getSendKey(item);
+  if (pendingSendKeys.has(sendKey)) {
+    showToast('This item is already being sent.', 'warning');
     return;
   }
+
+  if (compatibilityIssue) {
+    showToast(`Update required before sending jobs: ${compatibilityIssue}`, 'warning', 3800);
+    return;
+  }
+
+  pendingSendKeys.add(sendKey);
+  setQueueButtonBusy(queueButton, true);
 
   try {
     const res = await fetch(`${API_BASE}/v1/jobs`, {
@@ -178,17 +338,52 @@ async function sendJob(item) {
     }
 
     if (data.duplicate) {
-      alert(`Already queued: ${data.jobId} (position ${data.queuePosition + 1})`);
+      showToast(`Already queued: ${data.jobId} (position ${data.queuePosition + 1})`, 'warning');
       return;
     }
 
-    alert(`Queued: ${data.jobId} (position ${data.queuePosition + 1})`);
+    showToast(`Queued: ${data.jobId} (position ${data.queuePosition + 1})`, 'success');
   } catch (err) {
     if (!health) {
-      alert('Desktop app is not reachable. Open M3U8 Downloader desktop app and retry.');
+      showToast('Desktop app is not reachable. Open M3U8 Downloader desktop app and retry.', 'error', 3600);
       return;
     }
-    alert(`Failed to queue download: ${err.message}`);
+    const message = err && err.message ? err.message : String(err || 'Unknown error');
+    showToast(`Failed to queue download: ${message}`, 'error', 3600);
+  } finally {
+    pendingSendKeys.delete(sendKey);
+    setQueueButtonBusy(queueButton, false);
+  }
+}
+
+async function streamMedia(item, streamButton = null) {
+  const sendKey = getSendKey(item);
+  if (pendingStreamKeys.has(sendKey)) {
+    showToast('This item is already opening.', 'warning');
+    return;
+  }
+
+  const playerUrl = await buildStreamPlayerUrlWithSession(item);
+  if (!playerUrl) {
+    showToast('No stream URL found for this media item.', 'error');
+    return;
+  }
+
+  pendingStreamKeys.add(sendKey);
+  setStreamButtonBusy(streamButton, true);
+
+  try {
+    await chrome.tabs.create({
+      url: playerUrl,
+      active: true,
+    });
+    showToast('Opened stream player in a new tab.', 'success');
+  } catch (err) {
+    const message = err && err.message ? err.message : String(err || 'Unknown error');
+    showToast(`Failed to open stream: ${message}`, 'error', 3200);
+  } finally {
+    pendingStreamKeys.delete(sendKey);
+    setStreamButtonBusy(streamButton, false);
   }
 }
 
@@ -1067,7 +1262,7 @@ function renderMedia(items) {
     actionRow.className = 'flex items-center justify-between mt-2.5 gap-2';
 
     const detailsBtn = document.createElement('button');
-    detailsBtn.className = 'btn btn-ghost text-xs px-2 py-1';
+    detailsBtn.className = 'btn btn-subtle text-xs px-2 py-1';
     detailsBtn.textContent = 'Show Details';
     detailsBtn.setAttribute('aria-expanded', 'false');
 
@@ -1089,8 +1284,18 @@ function renderMedia(items) {
 
     const queueBtn = document.createElement('button');
     queueBtn.className = 'btn btn-primary text-xs';
-    queueBtn.innerHTML = '<svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg> Send to Desktop';
-    queueBtn.addEventListener('click', () => sendJob(item));
+    queueBtn.innerHTML = '<svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg> Send to App';
+    queueBtn.addEventListener('click', () => sendJob(item, queueBtn));
+
+    const streamBtn = document.createElement('button');
+    streamBtn.className = 'btn-icon-accent';
+    streamBtn.innerHTML = '<svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><polygon points="6 4 20 12 6 20 6 4"/></svg>';
+    streamBtn.title = 'Open stream player';
+    streamBtn.setAttribute('aria-label', 'Open stream player');
+    if (!buildStreamPlayerUrl(item)) {
+      streamBtn.disabled = true;
+    }
+    streamBtn.addEventListener('click', () => streamMedia(item, streamBtn));
 
     const detailsPanel = document.createElement('div');
     detailsPanel.className = 'details-panel';
@@ -1107,8 +1312,11 @@ function renderMedia(items) {
     detailsJson.className = 'details-json';
     detailsJson.textContent = JSON.stringify(debugPayload, null, 2);
 
+    const detailsJsonWrap = document.createElement('div');
+    detailsJsonWrap.className = 'details-json-wrap';
+
     const detailsCopyBtn = document.createElement('button');
-    detailsCopyBtn.className = 'btn-copy';
+    detailsCopyBtn.className = 'btn-copy details-json-copy';
     detailsCopyBtn.title = 'Copy details JSON';
     detailsCopyBtn.setAttribute('aria-label', 'Copy details JSON');
     detailsCopyBtn.innerHTML = '<svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>';
@@ -1129,9 +1337,10 @@ function renderMedia(items) {
     });
 
     detailsHeader.appendChild(detailsSummary);
-    detailsHeader.appendChild(detailsCopyBtn);
     detailsPanel.appendChild(detailsHeader);
-    detailsPanel.appendChild(detailsJson);
+    detailsJsonWrap.appendChild(detailsJson);
+    detailsJsonWrap.appendChild(detailsCopyBtn);
+    detailsPanel.appendChild(detailsJsonWrap);
 
     detailsBtn.addEventListener('click', () => {
       const isOpen = detailsPanel.style.display !== 'none';
@@ -1145,8 +1354,13 @@ function renderMedia(items) {
     leftActions.appendChild(detailsBtn);
     leftActions.appendChild(removeBtn);
 
+    const rightActions = document.createElement('div');
+    rightActions.className = 'flex items-center gap-2';
+    rightActions.appendChild(streamBtn);
+    rightActions.appendChild(queueBtn);
+
     actionRow.appendChild(leftActions);
-    actionRow.appendChild(queueBtn);
+    actionRow.appendChild(rightActions);
     wrapper.appendChild(titleRow);
     wrapper.appendChild(infoRow);
     wrapper.appendChild(metaRow);

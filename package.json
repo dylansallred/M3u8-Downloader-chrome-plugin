@@ -17,12 +17,21 @@
     "build:extension:css": "npm run build:css --workspace @m3u8/extension",
     "dev:extension:css": "npm run dev:css --workspace @m3u8/extension",
     "package:extension": "npm run build:extension:css && cd apps/extension && zip -r ../../m3u8-extension.zip . -x '*.DS_Store' -x 'node_modules/*' -x 'src/*'",
-    "lint": "echo 'No lint configured yet'",
+    "lint": "eslint . --ext .js,.jsx,.ts,.tsx --cache --cache-location .eslintcache",
+    "lint:fix": "npm run lint -- --fix",
+    "typecheck:desktop": "tsc --noEmit --project apps/desktop/tsconfig.json",
     "test": "node --test --test-force-exit tests/api.integration.test.js",
     "test:e2e": "playwright test"
   },
   "devDependencies": {
+    "@eslint/js": "^9.38.0",
     "@playwright/test": "^1.55.1"
+    ,
+    "eslint": "^9.38.0",
+    "eslint-plugin-react": "^7.37.5",
+    "eslint-plugin-react-hooks": "^7.0.0",
+    "globals": "^16.5.0",
+    "typescript-eslint": "^8.46.2"
   },
   "engines": {
     "node": ">=20"

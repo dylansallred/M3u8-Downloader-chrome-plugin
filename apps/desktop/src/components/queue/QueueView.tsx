@@ -1,5 +1,7 @@
+import { useEffect } from 'react';
 import { useQueue } from '@/hooks/useQueue';
 import { useActiveJob } from '@/hooks/useActiveJob';
+import type { QueueSettings } from '@/types/queue';
 import { ActiveDownloadCard } from './ActiveDownloadCard';
 import { QueueToolbar } from './QueueToolbar';
 import { QueueSummaryBar } from './QueueSummaryBar';
@@ -8,11 +10,28 @@ import { QueueJobCard } from './QueueJobCard';
 
 interface QueueViewProps {
   apiBase: string;
+  queueSettings: QueueSettings;
+  onQueueSettingsChange: (next: Partial<QueueSettings>) => Promise<void>;
+  onQueueSettingsSync: (next: QueueSettings) => void;
 }
 
-export function QueueView({ apiBase }: QueueViewProps) {
+export function QueueView({
+  apiBase,
+  queueSettings,
+  onQueueSettingsChange,
+  onQueueSettingsSync,
+}: QueueViewProps) {
   const queue = useQueue(apiBase);
   const { activeJob, activeMetrics } = useActiveJob(queue.queueData, apiBase);
+
+  useEffect(() => {
+    const next = queue.queueData.settings;
+    if (!next) return;
+    onQueueSettingsSync({
+      maxConcurrent: Number(next.maxConcurrent || 1),
+      autoStart: next.autoStart !== false,
+    });
+  }, [queue.queueData.settings, onQueueSettingsSync]);
 
   return (
     <div className="animate-fade-slide-in space-y-3">
@@ -35,10 +54,10 @@ export function QueueView({ apiBase }: QueueViewProps) {
       <div className="flex items-center justify-between gap-4">
         <QueueSummaryBar summary={queue.summary} />
         <QueueSettingsBar
-          maxConcurrent={queue.queueData.settings?.maxConcurrent || 1}
-          autoStart={queue.queueData.settings?.autoStart !== false}
+          maxConcurrent={queueSettings.maxConcurrent || 1}
+          autoStart={queueSettings.autoStart !== false}
           onSettingsChange={(settings) =>
-            queue.callAction('/api/queue/settings', 'POST', settings)
+            onQueueSettingsChange(settings)
           }
         />
       </div>

@@ -6,6 +6,7 @@ const path = require('node:path');
 const http = require('node:http');
 const net = require('node:net');
 const { setTimeout: delay } = require('node:timers/promises');
+const WebSocket = require('ws');
 
 process.env.NODE_ENV = process.env.NODE_ENV || 'test';
 process.env.LOG_LEVEL = process.env.LOG_LEVEL || 'error';
@@ -42,7 +43,9 @@ async function startFixtureMediaServer() {
   const port = await getFreePort();
 
   const server = http.createServer((req, res) => {
-    if (req.url === '/sample.mp4') {
+    const pathname = new URL(req.url, `http://127.0.0.1:${port}`).pathname;
+
+    if (pathname === '/sample.mp4') {
       const body = Buffer.alloc(512 * 1024, 1);
       res.writeHead(200, {
         'Content-Type': 'video/mp4',
@@ -52,7 +55,7 @@ async function startFixtureMediaServer() {
       return;
     }
 
-    if (req.url === '/slow.m3u8') {
+    if (pathname === '/slow.m3u8') {
       setTimeout(() => {
         const base = `http://127.0.0.1:${port}`;
         const playlist = [
@@ -76,7 +79,28 @@ async function startFixtureMediaServer() {
       return;
     }
 
-    if (req.url === '/broken.m3u8') {
+    if (pathname === '/long.m3u8') {
+      const base = `http://127.0.0.1:${port}`;
+      const lines = [
+        '#EXTM3U',
+        '#EXT-X-VERSION:3',
+        '#EXT-X-TARGETDURATION:2',
+      ];
+      for (let i = 1; i <= 18; i += 1) {
+        lines.push('#EXTINF:2,');
+        lines.push(`${base}/slow-seg-${i}.ts`);
+      }
+      lines.push('#EXT-X-ENDLIST', '');
+      const playlist = lines.join('\n');
+      res.writeHead(200, {
+        'Content-Type': 'application/vnd.apple.mpegurl',
+        'Content-Length': Buffer.byteLength(playlist),
+      });
+      res.end(playlist);
+      return;
+    }
+
+    if (pathname === '/broken.m3u8') {
       const base = `http://127.0.0.1:${port}`;
       const playlist = [
         '#EXTM3U',
@@ -96,7 +120,7 @@ async function startFixtureMediaServer() {
       return;
     }
 
-    if (req.url === '/seg-1.ts' || req.url === '/seg-2.ts') {
+    if (pathname === '/seg-1.ts' || pathname === '/seg-2.ts') {
       const body = Buffer.alloc(64 * 1024, 2);
       res.writeHead(200, {
         'Content-Type': 'video/mp2t',
@@ -106,7 +130,19 @@ async function startFixtureMediaServer() {
       return;
     }
 
-    if (req.url === '/missing-seg.ts') {
+    if (/^\/slow-seg-\d+[.]ts$/.test(pathname)) {
+      const body = Buffer.alloc(96 * 1024, 3);
+      setTimeout(() => {
+        res.writeHead(200, {
+          'Content-Type': 'video/mp2t',
+          'Content-Length': body.length,
+        });
+        res.end(body);
+      }, 250);
+      return;
+    }
+
+    if (pathname === '/missing-seg.ts') {
       res.writeHead(404, { 'Content-Type': 'text/plain' });
       res.end('Missing segment');
       return;
@@ -163,7 +199,6 @@ async function apiFetch(baseUrl, pathName, {
 
 async function waitFor(predicate, { timeoutMs = 10000, intervalMs = 150 } = {}) {
   const start = Date.now();
-  // eslint-disable-next-line no-constant-condition
   while (true) {
     const result = await predicate();
     if (result) return result;
@@ -173,6 +208,29 @@ async function waitFor(predicate, { timeoutMs = 10000, intervalMs = 150 } = {}) 
     }
     await delay(intervalMs);
   }
+}
+
+async function waitForWsMessage(ws, predicate, { timeoutMs = 5000 } = {}) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      ws.off('message', onMessage);
+      reject(new Error(`Timed out waiting for websocket message after ${timeoutMs}ms`));
+    }, timeoutMs);
+
+    const onMessage = (raw) => {
+      try {
+        const parsed = JSON.parse(String(raw || ''));
+        if (!predicate(parsed)) return;
+        clearTimeout(timer);
+        ws.off('message', onMessage);
+        resolve(parsed);
+      } catch {
+        // ignore malformed frames
+      }
+    };
+
+    ws.on('message', onMessage);
+  });
 }
 
 async function waitForJobQueueState(baseUrl, jobId, expectedStates, opts = {}) {
@@ -471,6 +529,70 @@ test('cancel endpoint stops an active job', async () => {
   }
 });
 
+test('pause then delete during active HLS download does not leave top-level .ts artifacts', async () => {
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'm3u8-tests-pause-delete-cleanup-'));
+  const port = await getFreePort();
+  const baseUrl = `http://127.0.0.1:${port}`;
+  const downloadDir = path.join(tmpRoot, 'downloads');
+
+  const mediaServer = await startFixtureMediaServer();
+  const apiServer = await startApi({ dataDir: tmpRoot, port });
+
+  try {
+    await apiFetch(baseUrl, '/api/queue/settings', {
+      method: 'POST',
+      includeV1Headers: false,
+      body: { maxConcurrent: 1, autoStart: true },
+    });
+
+    const createRes = await apiFetch(baseUrl, '/v1/jobs', {
+      method: 'POST',
+      body: {
+        mediaUrl: `${mediaServer.baseUrl}/long.m3u8`,
+        mediaType: 'hls',
+        title: 'Pause Delete Cleanup Job',
+      },
+    });
+    assert.equal(createRes.status, 200);
+    const jobId = createRes.data.jobId;
+
+    await waitForJobQueueState(baseUrl, jobId, 'downloading', { timeoutMs: 8_000, intervalMs: 120 });
+
+    const pauseRes = await apiFetch(baseUrl, `/api/queue/${jobId}/pause`, {
+      method: 'POST',
+      includeV1Headers: false,
+    });
+    assert.equal(pauseRes.status, 200);
+    await waitForJobQueueState(baseUrl, jobId, 'paused', { timeoutMs: 8_000, intervalMs: 150 });
+
+    const deleteRes = await apiFetch(baseUrl, `/api/queue/${jobId}?deleteFiles=true`, {
+      method: 'DELETE',
+      includeV1Headers: false,
+    });
+    assert.equal(deleteRes.status, 200);
+
+    await delay(500);
+
+    const files = fs.readdirSync(downloadDir, { withFileTypes: true });
+    const topLevelJobArtifacts = files
+      .filter((entry) => entry.isFile())
+      .map((entry) => entry.name)
+      .filter((name) => name.startsWith(`${jobId}-`));
+    const topLevelTsArtifacts = topLevelJobArtifacts.filter((name) => /[.]ts$/i.test(name));
+    assert.deepEqual(topLevelTsArtifacts, []);
+
+    const tempJobDirs = files
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name)
+      .filter((name) => name.startsWith('temp-') && name.endsWith(`-${jobId}`));
+    assert.deepEqual(tempJobDirs, []);
+    assert.equal(fs.existsSync(path.join(downloadDir, jobId)), false, 'expected job folder to be removed');
+  } finally {
+    await apiServer.stop();
+    await mediaServer.close();
+  }
+});
+
 test('hls job falls back to direct media URL when all segments fail', async () => {
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'm3u8-tests-fallback-'));
   const port = await getFreePort();
@@ -532,5 +654,349 @@ test('hls job falls back to direct media URL when all segments fail', async () =
   } finally {
     await apiServer.stop();
     await mediaServer.close();
+  }
+});
+
+test('queue auto-start fills available concurrency slots up to maxConcurrent', async () => {
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'm3u8-tests-concurrency-'));
+  const port = await getFreePort();
+  const baseUrl = `http://127.0.0.1:${port}`;
+
+  const mediaServer = await startFixtureMediaServer();
+  const apiServer = await startApi({ dataDir: tmpRoot, port });
+
+  try {
+    const settingsRes = await apiFetch(baseUrl, '/api/queue/settings', {
+      method: 'POST',
+      includeV1Headers: false,
+      body: { maxConcurrent: 3, autoStart: true },
+    });
+    assert.equal(settingsRes.status, 200);
+
+    const createdIds = [];
+    for (let i = 0; i < 4; i += 1) {
+      const createRes = await apiFetch(baseUrl, '/v1/jobs', {
+        method: 'POST',
+        body: {
+          mediaUrl: `${mediaServer.baseUrl}/slow.m3u8?job=${i}`,
+          mediaType: 'hls',
+          title: `Concurrency Job ${i + 1}`,
+        },
+      });
+      assert.equal(createRes.status, 200);
+      createdIds.push(createRes.data.jobId);
+    }
+
+    await waitFor(async () => {
+      const queueRes = await apiFetch(baseUrl, '/api/queue', { includeV1Headers: false });
+      const active = queueRes.data.queue.filter((job) => job.queueStatus === 'downloading').length;
+      return active >= 3 ? queueRes.data.queue : false;
+    }, { timeoutMs: 6000, intervalMs: 120 });
+
+    await waitFor(async () => {
+      const queueRes = await apiFetch(baseUrl, '/api/queue', { includeV1Headers: false });
+      const completed = queueRes.data.queue.filter((job) => job.queueStatus === 'completed').length;
+      return completed === createdIds.length ? true : false;
+    }, { timeoutMs: 20_000, intervalMs: 250 });
+  } finally {
+    await apiServer.stop();
+    await mediaServer.close();
+  }
+});
+
+test('completed downloads are stored under a per-job folder', async () => {
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'm3u8-tests-job-folder-layout-'));
+  const port = await getFreePort();
+  const baseUrl = `http://127.0.0.1:${port}`;
+  const downloadDir = path.join(tmpRoot, 'downloads');
+
+  const mediaServer = await startFixtureMediaServer();
+  const apiServer = await startApi({ dataDir: tmpRoot, port });
+
+  try {
+    const createRes = await apiFetch(baseUrl, '/v1/jobs', {
+      method: 'POST',
+      body: {
+        mediaUrl: `${mediaServer.baseUrl}/sample.mp4`,
+        mediaType: 'file',
+        title: 'Folder Layout Job',
+      },
+    });
+    assert.equal(createRes.status, 200);
+    const jobId = createRes.data.jobId;
+
+    await waitFor(async () => {
+      const queueRes = await apiFetch(baseUrl, '/api/queue', { includeV1Headers: false });
+      const job = queueRes.data.queue.find((entry) => entry.id === jobId);
+      return job && job.queueStatus === 'completed' ? true : false;
+    }, { timeoutMs: 12_000, intervalMs: 200 });
+
+    const queueFilePath = path.join(downloadDir, 'queue.json');
+    const queuePayload = JSON.parse(fs.readFileSync(queueFilePath, 'utf8'));
+    const persisted = (queuePayload.queue || []).find((entry) => entry.id === jobId);
+    assert.ok(persisted);
+    assert.equal(path.dirname(persisted.filePath), path.join(downloadDir, jobId));
+    assert.equal(fs.existsSync(persisted.filePath), true);
+  } finally {
+    await apiServer.stop();
+    await mediaServer.close();
+  }
+});
+
+test('websocket channels publish compatibility and queue updates', async () => {
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'm3u8-tests-ws-'));
+  const port = await getFreePort();
+  const baseUrl = `http://127.0.0.1:${port}`;
+  const wsUrl = `ws://127.0.0.1:${port}/ws`;
+
+  const mediaServer = await startFixtureMediaServer();
+  const apiServer = await startApi({ dataDir: tmpRoot, port });
+
+  const ws = new WebSocket(wsUrl);
+  await new Promise((resolve, reject) => {
+    ws.once('open', resolve);
+    ws.once('error', reject);
+  });
+
+  try {
+    const compatibilityMessagePromise = waitForWsMessage(
+      ws,
+      (message) => message && message.type === 'compatibility:update',
+      { timeoutMs: 5000 },
+    );
+    const initialQueueMessagePromise = waitForWsMessage(
+      ws,
+      (message) => message && message.type === 'queue:update',
+      { timeoutMs: 5000 },
+    );
+
+    ws.send(JSON.stringify({ type: 'subscribe', channel: 'compatibility' }));
+    ws.send(JSON.stringify({ type: 'subscribe', channel: 'queue' }));
+
+    const compatibilityMessage = await compatibilityMessagePromise;
+    assert.equal(compatibilityMessage.type, 'compatibility:update');
+    assert.equal(typeof compatibilityMessage.data.appVersion, 'string');
+
+    const initialQueueMessage = await initialQueueMessagePromise;
+    assert.equal(initialQueueMessage.type, 'queue:update');
+    assert.ok(Array.isArray(initialQueueMessage.data.queue));
+
+    const createRes = await apiFetch(baseUrl, '/v1/jobs', {
+      method: 'POST',
+      body: {
+        mediaUrl: `${mediaServer.baseUrl}/sample.mp4`,
+        mediaType: 'file',
+        title: 'WebSocket Queue Event Job',
+      },
+    });
+    assert.equal(createRes.status, 200);
+
+    const updateMessage = await waitForWsMessage(
+      ws,
+      (message) => (
+        message
+        && message.type === 'queue:update'
+        && Array.isArray(message.data?.queue)
+        && message.data.queue.some((job) => job.id === createRes.data.jobId)
+      ),
+      { timeoutMs: 7000 },
+    );
+    assert.equal(updateMessage.type, 'queue:update');
+  } finally {
+    ws.close();
+    await apiServer.stop();
+    await mediaServer.close();
+  }
+});
+
+test('history endpoint supports cursor pagination with persisted index', async () => {
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'm3u8-tests-history-pagination-'));
+  const port = await getFreePort();
+  const baseUrl = `http://127.0.0.1:${port}`;
+
+  const mediaServer = await startFixtureMediaServer();
+  const apiServer = await startApi({ dataDir: tmpRoot, port });
+
+  try {
+    await apiFetch(baseUrl, '/api/queue/settings', {
+      method: 'POST',
+      includeV1Headers: false,
+      body: { maxConcurrent: 1, autoStart: true },
+    });
+
+    for (let i = 0; i < 3; i += 1) {
+      const createRes = await apiFetch(baseUrl, '/v1/jobs', {
+        method: 'POST',
+        body: {
+          mediaUrl: `${mediaServer.baseUrl}/sample.mp4`,
+          mediaType: 'file',
+          title: `History Pagination ${i + 1}`,
+        },
+      });
+      assert.equal(createRes.status, 200);
+
+      const jobId = createRes.data.jobId;
+      await waitFor(async () => {
+        const queueRes = await apiFetch(baseUrl, '/api/queue', { includeV1Headers: false });
+        const job = queueRes.data.queue.find((entry) => entry.id === jobId);
+        return job && job.queueStatus === 'completed' ? true : false;
+      }, { timeoutMs: 12_000, intervalMs: 200 });
+    }
+
+    const page1 = await apiFetch(baseUrl, '/api/history?limit=1', { includeV1Headers: false });
+    assert.equal(page1.status, 200);
+    assert.equal(page1.data.items.length, 1);
+    assert.equal(typeof page1.data.nextCursor, 'string');
+
+    const page2 = await apiFetch(
+      baseUrl,
+      `/api/history?limit=1&cursor=${encodeURIComponent(page1.data.nextCursor)}`,
+      { includeV1Headers: false },
+    );
+    assert.equal(page2.status, 200);
+    assert.equal(page2.data.items.length, 1);
+    assert.notEqual(page2.data.items[0].fileName, page1.data.items[0].fileName);
+  } finally {
+    await apiServer.stop();
+    await mediaServer.close();
+  }
+});
+
+test('history delete removes related sidecar files and temp directories for the same job', async () => {
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'm3u8-tests-history-delete-artifacts-'));
+  const port = await getFreePort();
+  const baseUrl = `http://127.0.0.1:${port}`;
+  const downloadDir = path.join(tmpRoot, 'downloads');
+  fs.mkdirSync(downloadDir, { recursive: true });
+
+  const jobId = 'abc123-def456';
+  const targetFile = `${jobId}-cleanup-target.mp4`;
+  const jobDir = path.join(downloadDir, jobId);
+  fs.mkdirSync(jobDir, { recursive: true });
+  const relatedArtifacts = [
+    targetFile,
+    `${targetFile}.part`,
+    `${jobId}-thumb.jpg`,
+    `${jobId}-subtitles.srt`,
+    `${jobId}-subtitles.zip`,
+    `ts-parts-${jobId}.txt`,
+    `${jobId}-cleanup-target.ts`,
+  ];
+  const unrelatedFile = 'keep-this-file.mp4';
+  const unrelatedJobDir = path.join(downloadDir, 'otherjob-keep');
+  fs.mkdirSync(unrelatedJobDir, { recursive: true });
+  const unrelatedJobFile = path.join(unrelatedJobDir, 'otherjob-keep.ts');
+
+  relatedArtifacts.forEach((fileName) => {
+    fs.writeFileSync(path.join(jobDir, fileName), Buffer.from('artifact'));
+  });
+  fs.writeFileSync(path.join(downloadDir, unrelatedFile), Buffer.from('keep'));
+  fs.writeFileSync(unrelatedJobFile, Buffer.from('keep'));
+
+  const tempDir = path.join(downloadDir, `temp-history-cleanup-${jobId}`);
+  fs.mkdirSync(tempDir, { recursive: true });
+  fs.writeFileSync(path.join(tempDir, 'seg-1.ts'), Buffer.from('segment'));
+  fs.writeFileSync(path.join(tempDir, 'leftover.tmp'), Buffer.from('tmp'));
+
+  const apiServer = await startApi({ dataDir: tmpRoot, port });
+
+  try {
+    await waitFor(async () => {
+      const historyRes = await apiFetch(baseUrl, '/api/history', { includeV1Headers: false });
+      const item = historyRes.data.items.find((entry) => entry.fileName === targetFile);
+      if (!item) return false;
+      return item.thumbnailUrl === `/downloads/${jobId}/${jobId}-thumb.jpg` ? true : false;
+    }, { timeoutMs: 4000, intervalMs: 120 });
+
+    const deleteRes = await apiFetch(baseUrl, `/api/history/${encodeURIComponent(targetFile)}`, {
+      method: 'DELETE',
+      includeV1Headers: false,
+    });
+    assert.equal(deleteRes.status, 200);
+
+    relatedArtifacts.forEach((fileName) => {
+      assert.equal(fs.existsSync(path.join(jobDir, fileName)), false, `expected ${fileName} to be removed`);
+    });
+    assert.equal(fs.existsSync(jobDir), false, 'expected nested job folder to be removed');
+    assert.equal(fs.existsSync(tempDir), false, 'expected job temp directory to be removed');
+    assert.equal(fs.existsSync(path.join(downloadDir, unrelatedFile)), true, 'expected unrelated file to remain');
+    assert.equal(fs.existsSync(unrelatedJobFile), true, 'expected unrelated job file to remain');
+
+    const historyAfterDelete = await apiFetch(baseUrl, '/api/history', { includeV1Headers: false });
+    assert.equal(historyAfterDelete.status, 200);
+    assert.equal(
+      historyAfterDelete.data.items.some((entry) => entry.fileName === targetFile),
+      false,
+    );
+  } finally {
+    await apiServer.stop();
+  }
+});
+
+test('history clear removes stale managed artifacts including subtitles and partial files', async () => {
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'm3u8-tests-history-clear-artifacts-'));
+  const port = await getFreePort();
+  const baseUrl = `http://127.0.0.1:${port}`;
+  const downloadDir = path.join(tmpRoot, 'downloads');
+  fs.mkdirSync(downloadDir, { recursive: true });
+
+  const managedGroups = [
+    {
+      dir: path.join(downloadDir, 'job1'),
+      files: ['job1-clip.mp4', 'job1-clip.mp4.part', 'job1-thumb.jpg', 'job1-subtitles.srt'],
+    },
+    {
+      dir: path.join(downloadDir, 'job2'),
+      files: ['job2-clip.ts', 'job2-subtitles.zip', 'ts-parts-job2.txt'],
+    },
+  ];
+  for (const group of managedGroups) {
+    fs.mkdirSync(group.dir, { recursive: true });
+    group.files.forEach((fileName) => {
+      fs.writeFileSync(path.join(group.dir, fileName), Buffer.from('managed'));
+    });
+  }
+  const legacyManaged = path.join(downloadDir, 'legacy-job3-clip.mp4.part');
+  fs.writeFileSync(legacyManaged, Buffer.from('managed'));
+
+  const managedTempDirs = [
+    path.join(downloadDir, 'temp-orphan-job1'),
+    path.join(downloadDir, 'temp-orphan-job2'),
+  ];
+  managedTempDirs.forEach((dirPath) => {
+    fs.mkdirSync(dirPath, { recursive: true });
+    fs.writeFileSync(path.join(dirPath, 'seg-0.ts'), Buffer.from('segment'));
+  });
+
+  const keepFile = 'keep-notes.txt';
+  fs.writeFileSync(path.join(downloadDir, keepFile), Buffer.from('keep'));
+
+  const apiServer = await startApi({ dataDir: tmpRoot, port });
+
+  try {
+    const clearRes = await apiFetch(baseUrl, '/api/history', {
+      method: 'DELETE',
+      includeV1Headers: false,
+    });
+    assert.equal(clearRes.status, 200);
+
+    for (const group of managedGroups) {
+      group.files.forEach((fileName) => {
+        assert.equal(fs.existsSync(path.join(group.dir, fileName)), false, `expected ${fileName} to be removed`);
+      });
+      assert.equal(fs.existsSync(group.dir), false, `expected ${path.basename(group.dir)} to be removed`);
+    }
+    assert.equal(fs.existsSync(legacyManaged), false, 'expected legacy managed file to be removed');
+    managedTempDirs.forEach((dirPath) => {
+      assert.equal(fs.existsSync(dirPath), false, `expected ${path.basename(dirPath)} to be removed`);
+    });
+    assert.equal(fs.existsSync(path.join(downloadDir, keepFile)), true, 'expected unmanaged file to remain');
+
+    const historyRes = await apiFetch(baseUrl, '/api/history', { includeV1Headers: false });
+    assert.equal(historyRes.status, 200);
+    assert.equal(Array.isArray(historyRes.data.items), true);
+    assert.equal(historyRes.data.items.length, 0);
+  } finally {
+    await apiServer.stop();
   }
 });

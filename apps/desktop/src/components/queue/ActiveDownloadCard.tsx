@@ -42,6 +42,7 @@ export function ActiveDownloadCard({ job, metrics, apiBase, onAction }: ActiveDo
   const primaryAction = getQueuePrimaryAction(job);
   const progress = Math.max(0, Math.min(100, Number(job?.progress || 0)));
   const jobStatus = resolveJobStatus(job);
+  const isFinalizing = String(job?.status || '').toLowerCase() === 'finalizing';
   const isDownloading = jobStatus === 'downloading';
   const thumbnailUrl = job ? resolveThumbnailUrl(job.thumbnailUrls?.[0], apiBase) : null;
   const year = job ? extractYear(job.tmdbReleaseDate) : null;
@@ -71,7 +72,7 @@ export function ActiveDownloadCard({ job, metrics, apiBase, onAction }: ActiveDo
             <img
               src={thumbnailUrl}
               alt=""
-              className="w-16 h-24 object-cover rounded shrink-0"
+              className="w-24 h-36 object-cover rounded shrink-0"
               loading="lazy"
               onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
             />
@@ -86,39 +87,38 @@ export function ActiveDownloadCard({ job, metrics, apiBase, onAction }: ActiveDo
             {job.fallbackUsed && (
               <p className="text-primary text-[11px]">Fallback used: direct media URL</p>
             )}
-          </div>
-        </div>
-
-        {hasMetadata && (
-          <div className="mb-2 space-y-1">
-            <div className="flex items-center gap-1.5 flex-wrap">
-              {year && <span className="text-[11px] text-foreground-muted">{year}</span>}
-              {runtime && (
-                <>
-                  <span className="text-[11px] text-foreground-subtle">&middot;</span>
-                  <span className="text-[11px] text-foreground-muted">{runtime}</span>
-                </>
-              )}
-              {genres.length > 0 && (year || runtime) && (
-                <span className="text-[11px] text-foreground-subtle">&middot;</span>
-              )}
-              {genres.map((g) => (
-                <Badge
-                  key={g}
-                  variant="outline"
-                  className="text-[9px] font-normal border-border text-foreground-muted py-0 px-1.5 h-4"
-                >
-                  {g}
-                </Badge>
-              ))}
-            </div>
-            {displayText && (
-              <p className="text-[11px] text-foreground-muted leading-tight line-clamp-2">
-                {displayText}
-              </p>
+            {hasMetadata && (
+              <div className="mt-1.5 space-y-1">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {year && <span className="text-[11px] text-foreground-muted">{year}</span>}
+                  {runtime && (
+                    <>
+                      <span className="text-[11px] text-foreground-subtle">&middot;</span>
+                      <span className="text-[11px] text-foreground-muted">{runtime}</span>
+                    </>
+                  )}
+                  {genres.length > 0 && (year || runtime) && (
+                    <span className="text-[11px] text-foreground-subtle">&middot;</span>
+                  )}
+                  {genres.map((g) => (
+                    <Badge
+                      key={g}
+                      variant="outline"
+                      className="text-[9px] font-normal border-border text-foreground-muted py-0 px-1.5 h-4"
+                    >
+                      {g}
+                    </Badge>
+                  ))}
+                </div>
+                {displayText && (
+                  <p className="text-[11px] text-foreground-muted leading-tight line-clamp-2">
+                    {displayText}
+                  </p>
+                )}
+              </div>
             )}
           </div>
-        )}
+        </div>
 
         <div className="mb-2">
           <div className="flex justify-between text-xs text-foreground-muted mb-1">
@@ -146,10 +146,10 @@ export function ActiveDownloadCard({ job, metrics, apiBase, onAction }: ActiveDo
 
         <div className="grid grid-cols-[1fr_1fr_1fr_auto] gap-x-2 text-xs mb-2">
           <span className="text-foreground-muted whitespace-nowrap">
-            Speed: <span className="text-foreground font-medium tabular-nums">{formatBytesPerSecond(metrics.speedBps)}</span>
+            Speed: <span className="text-foreground font-medium tabular-nums">{isFinalizing ? 'finalizing...' : formatBytesPerSecond(metrics.speedBps)}</span>
           </span>
           <span className="text-foreground-muted whitespace-nowrap">
-            ETA: <span className="text-foreground font-medium tabular-nums">{formatEta(metrics.etaSeconds)}</span>
+            ETA: <span className="text-foreground font-medium tabular-nums">{isFinalizing ? 'finalizing...' : formatEta(metrics.etaSeconds)}</span>
           </span>
           <span className="text-foreground-muted whitespace-nowrap">
             Downloaded: <span className="text-foreground font-medium tabular-nums">{Math.round((job.bytesDownloaded || 0) / (1024 * 1024))} MB</span>
@@ -161,6 +161,12 @@ export function ActiveDownloadCard({ job, metrics, apiBase, onAction }: ActiveDo
             </span>
           )}
         </div>
+
+        {isFinalizing && (
+          <p className="text-[11px] text-foreground-muted mb-2">
+            Finalizing media file (merging segments/remuxing)...
+          </p>
+        )}
 
         {job.error && (
           <p className="text-destructive text-xs mb-2">Error: {job.error}</p>

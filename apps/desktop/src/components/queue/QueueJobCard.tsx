@@ -3,7 +3,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
-import { Dialog, DialogContent } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import { Play, Pause, RotateCcw, Trash2, RefreshCw } from 'lucide-react';
 import type { QueueJob } from '@/types/queue';
 import { cn, getQueueStatusLabel, getQueuePrimaryAction, resolveJobStatus, resolveThumbnailUrl, extractYear } from '@/lib/utils';
@@ -126,6 +126,10 @@ export function QueueJobCard({ job, apiBase, onAction }: QueueJobCardProps) {
     {thumbnailUrl && (
       <Dialog open={showPreview} onOpenChange={setShowPreview}>
         <DialogContent className="max-w-2xl p-2 bg-background border-border" showCloseButton={false}>
+          <DialogTitle className="sr-only">Preview: {job.title || job.id}</DialogTitle>
+          <DialogDescription className="sr-only">
+            Full-size preview image for {job.title || job.id}.
+          </DialogDescription>
           <img src={thumbnailUrl} alt={job.title || job.id} className="w-full rounded" />
         </DialogContent>
       </Dialog>

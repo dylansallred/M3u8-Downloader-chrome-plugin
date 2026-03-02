@@ -21,6 +21,99 @@ function createJobProcessor({
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
+  async function unlinkIfExists(filePath, context = {}) {
+    if (!filePath) return;
+    try {
+      await fsPromises.unlink(filePath);
+    } catch (err) {
+      if (err && err.code === 'ENOENT') return;
+      logger.warn('Failed to delete file during job cleanup', {
+        filePath,
+        error: err && err.message,
+        ...context,
+      });
+    }
+  }
+
+  async function cleanupCancelledHlsArtifacts(job, jobTempDir, options = {}) {
+    const preserveSegments = Boolean(options.preserveSegments);
+    const context = { jobId: job && job.id, preserveSegments };
+    const jobStorageDir = (() => {
+      if (job && typeof job.storageDir === 'string' && job.storageDir.trim()) {
+        return job.storageDir;
+      }
+      if (job && typeof job.filePath === 'string' && job.filePath.trim()) {
+        return path.dirname(job.filePath);
+      }
+      return downloadDir;
+    })();
+
+    try {
+      if (jobTempDir) {
+        if (preserveSegments) {
+          const files = await fsPromises.readdir(jobTempDir);
+          await Promise.all(
+            files
+              .filter((fileName) => fileName.endsWith('.tmp'))
+              .map((fileName) => unlinkIfExists(path.join(jobTempDir, fileName), context))
+          );
+        } else {
+          await fsPromises.rm(jobTempDir, { recursive: true, force: true });
+        }
+      }
+    } catch (err) {
+      logger.warn('Failed to cleanup cancelled HLS temp directory', {
+        ...context,
+        tempDir: jobTempDir,
+        error: err && err.message,
+      });
+    }
+
+    if (preserveSegments || !job) {
+      return;
+    }
+
+    const cleanupPaths = new Set();
+    const addPath = (candidatePath) => {
+      if (typeof candidatePath === 'string' && candidatePath.trim()) {
+        cleanupPaths.add(candidatePath);
+      }
+    };
+
+    addPath(job.filePath);
+    addPath(job.mp4Path);
+    addPath(job.filePath ? `${job.filePath}.part` : null);
+    addPath(job.mp4Path ? `${job.mp4Path}.part` : null);
+    addPath(job.subtitlePath);
+    addPath(job.subtitleZipPath);
+    addPath(job.thumbnailPath);
+    addPath(job.id && jobStorageDir ? path.join(jobStorageDir, `ts-parts-${job.id}.txt`) : null);
+
+    if (Array.isArray(job.tsParts)) {
+      job.tsParts.forEach((candidate) => addPath(candidate));
+    }
+
+    await Promise.all(Array.from(cleanupPaths).map((candidatePath) => unlinkIfExists(candidatePath, context)));
+
+    if (
+      job
+      && job.id
+      && typeof jobStorageDir === 'string'
+      && path.resolve(path.dirname(jobStorageDir)) === path.resolve(downloadDir)
+      && path.basename(jobStorageDir) === String(job.id)
+    ) {
+      try {
+        await fsPromises.rm(jobStorageDir, { recursive: true, force: true });
+      } catch (err) {
+        logger.warn('Failed to remove job storage directory during cancellation cleanup', {
+          ...context,
+          jobStorageDir,
+          error: err && err.message,
+        });
+      }
+    }
+  }
+
   async function concatenateSegmentsStreaming(job, segments, jobTempDir, maxPartBytes) {
     const tsParts = [];
     let partIndex = 0;
@@ -141,6 +234,12 @@ function createJobProcessor({
       logger.info('Direct job started', { jobId: job && job.id, url: job && job.url });
       job.status = 'downloading';
       job.updatedAt = Date.now();
+      if (!job.storageDir && job.filePath) {
+        job.storageDir = path.dirname(job.filePath);
+      }
+      if (job.filePath) {
+        await fsPromises.mkdir(path.dirname(job.filePath), { recursive: true });
+      }
 
       const headers = job.headers || {};
       const tempFilePath = `${job.filePath}.part`;
@@ -231,6 +330,13 @@ function createJobProcessor({
         }
       }
 
+      if (!downloaded && job.cancelled) {
+        await unlinkIfExists(tempFilePath, { jobId: job && job.id, reason: 'direct-cancelled' });
+        job.status = 'cancelled';
+        job.updatedAt = Date.now();
+        return;
+      }
+
       if (!downloaded) {
         throw lastErr || new Error('Direct download failed after retries');
       }
@@ -249,8 +355,13 @@ function createJobProcessor({
     } catch (err) {
       logger.error('Direct job failed', { jobId: job && job.id, error: err && err.message });
       if (job) {
-        job.status = 'error';
-        job.error = (err && err.message) || 'Direct download failure';
+        if (job.cancelled) {
+          job.status = 'cancelled';
+          job.error = null;
+        } else {
+          job.status = 'error';
+          job.error = (err && err.message) || 'Direct download failure';
+        }
         job.updatedAt = Date.now();
       }
     }
@@ -330,6 +441,12 @@ function createJobProcessor({
       logger.info('HLS job started', { jobId: job && job.id, url: job && job.url });
       job.status = 'fetching-playlist';
       job.updatedAt = Date.now();
+      if (!job.storageDir && job.filePath) {
+        job.storageDir = path.dirname(job.filePath);
+      }
+      if (job.filePath) {
+        await fsPromises.mkdir(path.dirname(job.filePath), { recursive: true });
+      }
 
       const headers = job.headers || {};
       const playlistText = await fetchText(job.url, headers);
@@ -351,7 +468,7 @@ function createJobProcessor({
         : DEFAULT_MAX_CONCURRENT;
 
       // Create or reuse temp directory for this playlist's segment files, based on URL
-      const jobTempDir = getJobTempDirForUrl(job.url);
+      const jobTempDir = getJobTempDirForUrl(job.url, job.id);
       await fsPromises.mkdir(jobTempDir, { recursive: true });
 
       // Check for existing segments from previous download attempts
@@ -707,7 +824,9 @@ function createJobProcessor({
           let computedProgress = job.totalSegments
             ? Math.round((actuallyCompleted / job.totalSegments) * 100)
             : 0;
-          if (hasInFlight && computedProgress >= 100) {
+          // Keep progress below 100 while post-download finalize steps are pending.
+          // "100%" should only mean the download is fully complete and usable.
+          if (computedProgress >= 100) {
             computedProgress = 99;
           }
           job.progress = computedProgress;
@@ -731,8 +850,29 @@ function createJobProcessor({
       }
       await Promise.all(workers);
 
+      if (job.cancelled) {
+        const preserveSegmentsForPause = !!job.pauseRequested && !job.cleanupOnCancel;
+        await cleanupCancelledHlsArtifacts(job, jobTempDir, { preserveSegments: preserveSegmentsForPause });
+        job.status = 'cancelled';
+        job.updatedAt = Date.now();
+        logger.info('HLS job cancelled before finalization', {
+          jobId: job && job.id,
+          preserveSegmentsForPause,
+          cleanupOnCancel: !!job.cleanupOnCancel,
+        });
+        return;
+      }
+
       if (!job.cancelled && job.failedSegments.length > 0 && job.completedSegments === 0) {
         throw new Error('All segments failed to download.');
+      }
+
+      if (!job.cancelled) {
+        job.status = 'finalizing';
+        if (job.progress >= 100) {
+          job.progress = 99;
+        }
+        job.updatedAt = Date.now();
       }
 
       const tsParts = await concatenateSegmentsStreaming(job, segments, jobTempDir, MAX_TS_PART_BYTES);
@@ -801,8 +941,18 @@ function createJobProcessor({
         return;
       }
       if (job) {
-        job.status = 'error';
-        job.error = (err && err.message) || 'Unknown job failure';
+        if (job.cancelled) {
+          const cleanupOnCancel = !!job.cleanupOnCancel;
+          const jobTempDir = getJobTempDirForUrl(job.url, job.id);
+          await cleanupCancelledHlsArtifacts(job, jobTempDir, {
+            preserveSegments: !!job.pauseRequested && !cleanupOnCancel,
+          });
+          job.status = 'cancelled';
+          job.error = null;
+        } else {
+          job.status = 'error';
+          job.error = (err && err.message) || 'Unknown job failure';
+        }
         job.updatedAt = Date.now();
       }
     }

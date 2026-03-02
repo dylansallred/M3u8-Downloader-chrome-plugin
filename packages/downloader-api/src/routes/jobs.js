@@ -1,15 +1,116 @@
 const fs = require('fs');
 const path = require('path');
+const http = require('http');
+const https = require('https');
 const { URL } = require('url');
 const logger = require('../utils/logger');
 const { jobValidation, jobIdValidation } = require('../utils/validators');
 const { lookupPoster } = require('../services/tmdb');
 const { fetchAndSaveSubtitles } = require('../services/subdl');
 const { inferMediaMetadata } = require('../utils/mediaMetadata');
+const { buildDownloadAssetUrl, buildJobStorageDir } = require('../utils/downloadPaths');
 const config = require('../config');
 
 if (!config.subdlApiKey) {
   logger.warn('SUBDL_API_KEY environment variable not set - subtitle download will be disabled');
+}
+
+function isHttpUrl(value) {
+  if (typeof value !== 'string' || !value.trim()) return false;
+  try {
+    const parsed = new URL(value.trim());
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+function downloadRemoteImage(url, destinationPath, redirectBudget = 3) {
+  return new Promise((resolve) => {
+    if (!isHttpUrl(url)) {
+      resolve(false);
+      return;
+    }
+
+    const parsed = new URL(url);
+    const client = parsed.protocol === 'https:' ? https : http;
+    const tempPath = `${destinationPath}.tmp`;
+    let settled = false;
+
+    const settle = (value) => {
+      if (settled) return;
+      settled = true;
+      resolve(value);
+    };
+
+    const req = client.get(url, {
+      timeout: 12_000,
+      headers: { 'User-Agent': 'M3U8-Downloader/1.0' },
+    }, (res) => {
+      const status = Number(res.statusCode || 0);
+      if (status >= 300 && status < 400 && res.headers.location && redirectBudget > 0) {
+        res.resume();
+        const redirected = new URL(String(res.headers.location), url).toString();
+        downloadRemoteImage(redirected, destinationPath, redirectBudget - 1).then(settle);
+        return;
+      }
+
+      if (status < 200 || status >= 300) {
+        res.resume();
+        settle(false);
+        return;
+      }
+
+      const out = fs.createWriteStream(tempPath);
+      out.on('error', () => {
+        try { fs.unlinkSync(tempPath); } catch {}
+        settle(false);
+      });
+      res.on('error', () => {
+        try { fs.unlinkSync(tempPath); } catch {}
+        settle(false);
+      });
+      out.on('finish', () => {
+        try {
+          fs.renameSync(tempPath, destinationPath);
+          settle(true);
+        } catch {
+          try { fs.unlinkSync(tempPath); } catch {}
+          settle(false);
+        }
+      });
+      res.pipe(out);
+    });
+
+    req.on('timeout', () => req.destroy(new Error('timeout')));
+    req.on('error', () => settle(false));
+  });
+}
+
+async function persistRemoteThumbnailLocally(job, downloadDir) {
+  if (!job) return false;
+  const remoteThumb = Array.isArray(job.thumbnailUrls)
+    ? job.thumbnailUrls.find((url) => isHttpUrl(url))
+    : null;
+  if (!remoteThumb) return false;
+
+  const storageDir = job.storageDir || (job.filePath ? path.dirname(job.filePath) : downloadDir);
+  const thumbPath = path.join(storageDir, `${job.id}-thumb.jpg`);
+  try {
+    await fs.promises.mkdir(storageDir, { recursive: true });
+    if (fs.existsSync(thumbPath)) {
+      job.thumbnailPath = thumbPath;
+      return true;
+    }
+    const ok = await downloadRemoteImage(remoteThumb, thumbPath);
+    if (ok) {
+      job.thumbnailPath = thumbPath;
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
 }
 
 async function fetchSubtitlesForJob(job, downloadDir, queueManager, opts = {}) {
@@ -23,12 +124,14 @@ async function fetchSubtitlesForJob(job, downloadDir, queueManager, opts = {}) {
 
   try {
     const { seasonNumber, episodeNumber, type, lookupTitle } = opts;
+    const targetDir = job.storageDir || (job.filePath ? path.dirname(job.filePath) : downloadDir);
+    await fs.promises.mkdir(targetDir, { recursive: true });
     const result = await fetchAndSaveSubtitles({
       apiKey: config.subdlApiKey,
       title: lookupTitle || job.title,
       tmdbId: job.tmdbId,
       imdbId: job.imdbId,
-      downloadDir,
+      downloadDir: targetDir,
       jobId: job.id,
       logger,
       seasonNumber,
@@ -100,6 +203,7 @@ function registerJobRoutes(
     let filePath;
     let tsName;
     let downloadNameMp4;
+    const storageDir = buildJobStorageDir(downloadDir, id);
 
     if (isHls) {
       // HLS flow: use TS container internally and MP4 as the final remuxed output.
@@ -110,7 +214,7 @@ function registerJobRoutes(
         tsName = `${tsName}.ts`;
       }
 
-      filePath = path.join(downloadDir, `${id}-${tsName}`);
+      filePath = path.join(storageDir, `${id}-${tsName}`);
 
       downloadNameMp4 = fileNameBase;
       if (/\.m3u8$/i.test(downloadNameMp4)) {
@@ -135,7 +239,7 @@ function registerJobRoutes(
       }
 
       const directName = `${fileNameBase}${ext}`;
-      filePath = path.join(downloadDir, `${id}-${directName}`);
+      filePath = path.join(storageDir, `${id}-${directName}`);
 
       // For direct downloads, this is already the final user-facing name.
       tsName = directName;
@@ -161,6 +265,7 @@ function registerJobRoutes(
       bytesDownloaded: 0,
       progress: 0,
       error: null,
+      storageDir,
       filePath,
       downloadName: tsName,
       mp4Path: null,
@@ -280,6 +385,7 @@ function registerJobRoutes(
                 mediaType: tmdbResult.mediaType || type,
               };
               job.skipThumbnailGeneration = true;
+              await persistRemoteThumbnailLocally(job, downloadDir);
               queueManager.saveQueue();
               logger.info('TMDB lookup success', { jobId: job.id, tmdbId: tmdbResult.id, thumbnails: job.thumbnailUrls.length });
             } else {
@@ -340,6 +446,7 @@ function registerJobRoutes(
                 mediaType: tmdbResult.mediaType || type,
               };
               job.skipThumbnailGeneration = true;
+              await persistRemoteThumbnailLocally(job, downloadDir);
               queueManager.saveQueue();
               logger.info('TMDB lookup success', { jobId: job.id, tmdbId: tmdbResult.id, thumbnails: job.thumbnailUrls.length });
             } else {
@@ -409,9 +516,12 @@ function registerJobRoutes(
     }
 
     const localThumbs = Array.isArray(job.thumbnailPaths)
-      ? job.thumbnailPaths.filter(p => fs.existsSync(p)).map(p => `/downloads/${path.basename(p)}`)
+      ? job.thumbnailPaths
+        .filter((p) => fs.existsSync(p))
+        .map((p) => buildDownloadAssetUrl(downloadDir, p))
+        .filter(Boolean)
       : (job.thumbnailPath && fs.existsSync(job.thumbnailPath)
-          ? [`/downloads/${path.basename(job.thumbnailPath)}`]
+          ? [buildDownloadAssetUrl(downloadDir, job.thumbnailPath)].filter(Boolean)
           : []);
 
     const remoteThumbs = Array.isArray(job.thumbnailUrls)
@@ -419,7 +529,7 @@ function registerJobRoutes(
       : [];
 
     const subtitleDownloadUrl = job.subtitlePath && fs.existsSync(job.subtitlePath)
-      ? `/downloads/${path.basename(job.subtitlePath)}`
+      ? buildDownloadAssetUrl(downloadDir, job.subtitlePath)
       : null;
 
     res.json({
@@ -439,7 +549,7 @@ function registerJobRoutes(
       originalHlsUrl: job.originalHlsUrl || null,
       fallbackAttempted: !!job.fallbackAttempted,
       fallbackUsed: !!job.fallbackUsed,
-      thumbnailUrls: [...remoteThumbs, ...localThumbs],
+      thumbnailUrls: [...localThumbs, ...remoteThumbs],
       subtitlePath: job.subtitlePath || null,
       subtitleDownloadUrl,
       updatedAt: job.updatedAt,
@@ -460,6 +570,7 @@ function registerJobRoutes(
     }
 
     job.cancelled = true;
+    job.cleanupOnCancel = true;
     if (job.status === 'pending' || job.status === 'fetching-playlist' || job.status === 'downloading') {
       job.status = 'cancelled';
       job.updatedAt = Date.now();

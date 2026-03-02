@@ -3,152 +3,298 @@ const fs = require('fs');
 const logger = require('../utils/logger');
 const { historyFileParamValidation } = require('../utils/validators');
 
-async function registerHistoryRoutes(app, fsPromises, downloadDir, jobs) {
-  // Simple download history based on files present in downloads directory
+const HISTORY_MEDIA_EXTENSIONS = new Set([
+  '.mp4',
+  '.ts',
+  '.mkv',
+  '.mov',
+  '.webm',
+  '.m4v',
+  '.avi',
+]);
+
+const HISTORY_STREAM_CONTENT_TYPES = {
+  '.mp4': 'video/mp4',
+  '.ts': 'video/mp2t',
+  '.mkv': 'video/x-matroska',
+  '.mov': 'video/quicktime',
+  '.webm': 'video/webm',
+  '.m4v': 'video/x-m4v',
+  '.avi': 'video/x-msvideo',
+};
+
+const PROTECTED_TOP_LEVEL_FILES = new Set(['queue.json', 'history-index.json']);
+
+function isHistoryMediaFileName(fileName) {
+  return HISTORY_MEDIA_EXTENSIONS.has(path.extname(String(fileName || '')).toLowerCase());
+}
+
+function isManagedHistoryArtifactFileName(fileName) {
+  const name = String(fileName || '');
+  if (!name) return false;
+  if (isHistoryMediaFileName(name)) return true;
+  if (name.endsWith('-thumb.jpg')) return true;
+  if (name.endsWith('-subtitles.srt')) return true;
+  if (name.endsWith('-subtitles.zip')) return true;
+  if (name.endsWith('.part')) return true;
+  if (/^ts-parts-[a-z0-9]+(?:-[a-z0-9]+)?[.]txt$/i.test(name)) return true;
+  return false;
+}
+
+function extractJobIdFromArtifactName(fileName) {
+  const name = path.basename(String(fileName || '').trim());
+  if (!name) return null;
+
+  const tsPartsMatch = name.match(/^ts-parts-([a-z0-9]+-[a-z0-9]+)[.]txt$/i);
+  if (tsPartsMatch) {
+    return tsPartsMatch[1];
+  }
+
+  const legacyTsPartsMatch = name.match(/^ts-parts-([a-z0-9]+)[.]txt$/i);
+  if (legacyTsPartsMatch) {
+    return legacyTsPartsMatch[1];
+  }
+
+  const normalized = name.replace(/[.]part$/i, '');
+  const modernMatch = normalized.match(/^([a-z0-9]+-[a-z0-9]+)-/i);
+  if (modernMatch) {
+    return modernMatch[1];
+  }
+
+  const legacyMatch = normalized.match(/^([a-z0-9]+)-/i);
+  if (legacyMatch) {
+    return legacyMatch[1];
+  }
+
+  return null;
+}
+
+async function walkDownloadEntries(fsPromises, rootDir, currentDir = rootDir, relativeDir = '') {
+  const entries = await fsPromises.readdir(currentDir, { withFileTypes: true });
+  const files = [];
+  const directories = [];
+
+  for (const entry of entries) {
+    const relPath = relativeDir ? `${relativeDir}/${entry.name}` : entry.name;
+    const fullPath = path.join(currentDir, entry.name);
+
+    if (entry.isDirectory()) {
+      directories.push({ fullPath, relativePath: relPath, entry });
+      const nested = await walkDownloadEntries(fsPromises, rootDir, fullPath, relPath);
+      files.push(...nested.files);
+      directories.push(...nested.directories);
+      continue;
+    }
+
+    if (entry.isFile()) {
+      files.push({ fullPath, relativePath: relPath, entry });
+    }
+  }
+
+  return { files, directories };
+}
+
+async function deleteFilePaths(fsPromises, filePaths) {
+  const deleted = [];
+  for (const filePath of filePaths) {
+    try {
+      await fsPromises.unlink(filePath);
+      deleted.push(filePath);
+    } catch (err) {
+      if (err && err.code !== 'ENOENT') {
+        logger.warn('Failed to delete history artifact', { filePath, error: err.message });
+      }
+    }
+  }
+  return deleted;
+}
+
+async function removeEmptyDirectories(fsPromises, rootDir, currentDir = rootDir) {
+  const entries = await fsPromises.readdir(currentDir, { withFileTypes: true });
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const dirPath = path.join(currentDir, entry.name);
+    await removeEmptyDirectories(fsPromises, rootDir, dirPath);
+  }
+
+  if (currentDir === rootDir) {
+    return;
+  }
+
+  try {
+    const remaining = await fsPromises.readdir(currentDir);
+    if (remaining.length === 0) {
+      await fsPromises.rmdir(currentDir);
+    }
+  } catch (err) {
+    if (err && err.code !== 'ENOENT') {
+      logger.warn('Failed to remove empty history directory', {
+        directory: currentDir,
+        error: err.message,
+      });
+    }
+  }
+}
+
+function collectActiveJobIds(historyIndex) {
+  const activeJobIds = new Set();
+  if (!historyIndex || typeof historyIndex.buildActiveJobFiles !== 'function') {
+    return activeJobIds;
+  }
+
+  const activeFiles = historyIndex.buildActiveJobFiles();
+  for (const fileName of activeFiles || []) {
+    const jobId = extractJobIdFromArtifactName(fileName);
+    if (jobId) {
+      activeJobIds.add(jobId);
+    }
+  }
+  return activeJobIds;
+}
+
+async function resolveHistoryFilePath(fsPromises, historyIndex, downloadDir, safeName) {
+  if (!safeName) return null;
+
+  const indexResolved = historyIndex && typeof historyIndex.resolveFilePath === 'function'
+    ? historyIndex.resolveFilePath(safeName)
+    : null;
+  if (indexResolved) {
+    try {
+      await fsPromises.access(indexResolved);
+      return indexResolved;
+    } catch {
+      // fall through
+    }
+  }
+
+  const directPath = path.join(downloadDir, safeName);
+  try {
+    await fsPromises.access(directPath);
+    return directPath;
+  } catch {
+    // Fall through to recursive lookup for nested job folders.
+  }
+
+  try {
+    const { files } = await walkDownloadEntries(fsPromises, downloadDir);
+    const match = files.find((entry) => entry.entry.name === safeName);
+    return match ? match.fullPath : null;
+  } catch {
+    return null;
+  }
+}
+
+function buildLegacyRelatedArtifactPaths(primaryFilePath, allFilePaths) {
+  const related = new Set([primaryFilePath, `${primaryFilePath}.part`]);
+  const jobId = extractJobIdFromArtifactName(path.basename(primaryFilePath));
+  if (!jobId) {
+    return Array.from(related).filter((candidate) => allFilePaths.has(candidate));
+  }
+
+  const jobPrefix = `${jobId}-`;
+  for (const filePath of allFilePaths) {
+    const fileName = path.basename(filePath);
+    if (fileName === `ts-parts-${jobId}.txt`) {
+      related.add(filePath);
+      continue;
+    }
+    if (!fileName.startsWith(jobPrefix)) continue;
+    if (isManagedHistoryArtifactFileName(fileName)) {
+      related.add(filePath);
+    }
+  }
+
+  return Array.from(related).filter((candidate) => allFilePaths.has(candidate));
+}
+
+async function deleteTempDirectoriesForJobIds(fsPromises, downloadDir, jobIds) {
+  if (!jobIds || jobIds.size === 0) return 0;
+
+  let removedCount = 0;
+  try {
+    const entries = await fsPromises.readdir(downloadDir, { withFileTypes: true });
+    const deletions = entries
+      .filter((entry) => entry.isDirectory())
+      .filter((entry) => entry.name.startsWith('temp-'))
+      .filter((entry) => Array.from(jobIds).some((jobId) => entry.name.endsWith(`-${jobId}`)))
+      .map(async (entry) => {
+        const fullPath = path.join(downloadDir, entry.name);
+        try {
+          await fsPromises.rm(fullPath, { recursive: true, force: true });
+          removedCount += 1;
+        } catch (err) {
+          logger.warn('Failed to delete temp directory for history cleanup', {
+            directory: entry.name,
+            error: err.message,
+          });
+        }
+      });
+    await Promise.all(deletions);
+  } catch (err) {
+    logger.warn('Failed to enumerate temp directories for history cleanup', { error: err.message });
+  }
+  return removedCount;
+}
+
+async function registerHistoryRoutes(app, historyIndex, fsPromises, downloadDir) {
+  if (!historyIndex) {
+    throw new Error('registerHistoryRoutes requires historyIndex');
+  }
+
   app.get('/api/history', async (req, res) => {
     try {
-      const items = await fsPromises.readdir(downloadDir, { withFileTypes: true });
-      const files = [];
+      const limit = req.query.limit;
+      const cursor = req.query.cursor;
+      const result = await historyIndex.list({ limit, cursor });
 
-      // Collect all filenames for cross-reference (to skip .ts when .mp4 exists)
-      const allFileNames = new Set(items.filter(e => e.isFile()).map(e => e.name));
-
-      // Build set of active job file basenames to exclude intermediate .ts files
-      const activeJobFiles = new Set();
-      if (jobs) {
-        for (const [, job] of jobs) {
-          const status = job.status || job.queueStatus;
-          if (status && status !== 'completed' && status !== 'completed-with-errors' && status !== 'failed' && status !== 'cancelled') {
-            if (job.filePath) activeJobFiles.add(path.basename(job.filePath));
-            if (job.mp4Path) activeJobFiles.add(path.basename(job.mp4Path));
-          }
-        }
+      const response = { items: result.items };
+      if (cursor || limit) {
+        response.nextCursor = result.nextCursor;
+        response.total = result.total;
       }
-
-      for (const entry of items) {
-        if (!entry.isFile()) continue;
-        const fileName = entry.name;
-        const ext = path.extname(fileName).toLowerCase();
-        if (ext !== '.mp4' && ext !== '.ts') continue;
-
-        // Skip intermediate .ts files: if a matching .mp4 exists or the job is still active
-        if (ext === '.ts') {
-          const mp4Variant = fileName.replace(/\.ts$/i, '.mp4');
-          if (allFileNames.has(mp4Variant)) continue;
-          if (activeJobFiles.has(fileName)) continue;
-        }
-
-        const fullPath = path.join(downloadDir, fileName);
-        let stats;
-        try {
-          stats = await fsPromises.stat(fullPath);
-        } catch {
-          continue;
-        }
-
-        const sizeBytes = stats.size;
-        const modifiedAt = stats.mtimeMs || stats.mtime.getTime();
-
-        // Derive a friendly label by stripping the job id prefix when present:
-        //   <jobId>-<originalName>
-        let label = fileName;
-        const dashIndex = fileName.indexOf('-');
-        if (dashIndex > 0 && dashIndex < fileName.length - 1) {
-          label = fileName.slice(dashIndex + 1);
-        }
-
-        // Derive job id prefix from file name to check for matching thumbnail
-        const jobIdPrefix = fileName.split('-')[0];
-
-        // Validate jobIdPrefix to prevent path traversal
-        // Only allow alphanumeric characters, max 20 chars
-        const isValidJobId = /^[a-z0-9]+$/i.test(jobIdPrefix) && jobIdPrefix.length <= 20;
-
-        let hasThumb = false;
-        let thumbName;
-        if (isValidJobId) {
-          thumbName = `${jobIdPrefix}-thumb.jpg`;
-          const thumbPath = path.join(downloadDir, thumbName);
-          try {
-            await fsPromises.access(thumbPath);
-            hasThumb = true;
-          } catch {
-            hasThumb = false;
-          }
-        }
-
-        // Cross-reference with jobs Map for TMDB metadata and remote thumbnails
-        let thumbnailUrl = hasThumb ? `/downloads/${thumbName}` : null;
-        let title = null;
-        let tmdbReleaseDate = null;
-        let tmdbMetadata = null;
-
-        if (jobs && isValidJobId) {
-          // Find matching job by scanning the jobs Map for a job whose filePath contains this fileName
-          for (const [, job] of jobs) {
-            if (!job.filePath) continue;
-            const jobFileName = path.basename(job.filePath);
-            // Match by file path basename or mp4 path basename
-            const mp4FileName = job.mp4Path ? path.basename(job.mp4Path) : null;
-            if (jobFileName === fileName || mp4FileName === fileName) {
-              title = job.title || null;
-              tmdbReleaseDate = job.tmdbReleaseDate || null;
-              tmdbMetadata = job.tmdbMetadata || null;
-              // Use TMDB thumbnail if no local thumb
-              if (!thumbnailUrl && Array.isArray(job.thumbnailUrls) && job.thumbnailUrls.length > 0) {
-                thumbnailUrl = job.thumbnailUrls[0];
-              }
-              break;
-            }
-          }
-        }
-
-        files.push({
-          id: fileName,
-          fileName,
-          label,
-          jobId: isValidJobId ? jobIdPrefix : null,
-          title,
-          sizeBytes,
-          modifiedAt,
-          ext,
-          thumbnailUrl,
-          tmdbReleaseDate,
-          tmdbMetadata,
-        });
-      }
-
-      // Sort descending by modified time (newest first)
-      files.sort((a, b) => b.modifiedAt - a.modifiedAt);
-
-      // To keep the UI responsive even when many files exist, only return the
-      // most recent subset here. The client can still operate quickly when
-      // rendering this smaller list.
-      const MAX_HISTORY_ITEMS = 200;
-      const limited = files.slice(0, MAX_HISTORY_ITEMS);
-
-      res.json({ items: limited });
+      res.json(response);
     } catch (err) {
       logger.error('Failed to read download history', { error: err.message });
       res.status(500).json({ error: 'Failed to read download history' });
     }
   });
 
-  // Delete all history files
   app.delete('/api/history', async (req, res) => {
     try {
-      const items = await fsPromises.readdir(downloadDir, { withFileTypes: true });
-      const deletions = items
-        .filter((entry) => entry.isFile())
-        .map((entry) => entry.name)
-        .filter((name) => {
-          const ext = path.extname(name).toLowerCase();
-          return ext === '.mp4' || ext === '.ts' || name.endsWith('-thumb.jpg');
-        })
-        .map((name) => fsPromises.unlink(path.join(downloadDir, name)).catch(() => null));
+      const activeJobIds = collectActiveJobIds(historyIndex);
+      const { files } = await walkDownloadEntries(fsPromises, downloadDir);
 
-      await Promise.all(deletions);
-      logger.info('History cleared');
+      const filePathsToDelete = files
+        .filter((entry) => {
+          const rel = entry.relativePath;
+          if (!rel.includes('/') && PROTECTED_TOP_LEVEL_FILES.has(entry.entry.name)) {
+            return false;
+          }
+          if (!isManagedHistoryArtifactFileName(entry.entry.name)) {
+            return false;
+          }
+          const jobId = extractJobIdFromArtifactName(entry.entry.name);
+          return !jobId || !activeJobIds.has(jobId);
+        })
+        .map((entry) => entry.fullPath);
+
+      const deleted = await deleteFilePaths(fsPromises, filePathsToDelete);
+      const deletedJobIds = new Set(
+        deleted
+          .map((fullPath) => extractJobIdFromArtifactName(path.basename(fullPath)))
+          .filter(Boolean)
+      );
+      await deleteTempDirectoriesForJobIds(fsPromises, downloadDir, deletedJobIds);
+      await removeEmptyDirectories(fsPromises, downloadDir);
+
+      if (typeof historyIndex.refreshFromDisk === 'function') {
+        await historyIndex.refreshFromDisk({ force: true });
+      }
+
+      logger.info('History cleared', {
+        filesDeleted: deleted.length,
+        jobIdsAffected: deletedJobIds.size,
+      });
       res.json({ ok: true });
     } catch (err) {
       logger.error('Failed to clear history', { error: err.message });
@@ -156,56 +302,42 @@ async function registerHistoryRoutes(app, fsPromises, downloadDir, jobs) {
     }
   });
 
-  // Download a previously completed file from history
   app.get('/api/history/file/:fileName', historyFileParamValidation, async (req, res) => {
-    const fileName = req.params.fileName;
-    if (!fileName) {
+    const safeName = path.basename(req.params.fileName || '');
+    if (!safeName) {
       return res.status(400).send('Missing fileName');
     }
 
-    const safeName = path.basename(fileName);
-    const fullPath = path.join(downloadDir, safeName);
-
-    try {
-      await fsPromises.access(fullPath);
-    } catch {
-      logger.warn('History download requested for missing file', { fileName: safeName, fullPath });
+    const fullPath = await resolveHistoryFilePath(fsPromises, historyIndex, downloadDir, safeName);
+    if (!fullPath) {
+      logger.warn('History download requested for missing file', { fileName: safeName });
       return res.status(404).send('File not found');
     }
 
-    // Use the friendly part of the name (without job id prefix) as the download name
     let downloadName = safeName;
     const dashIndex = safeName.indexOf('-');
     if (dashIndex > 0 && dashIndex < safeName.length - 1) {
       downloadName = safeName.slice(dashIndex + 1);
     }
 
-    logger.info('History file download started', { fileName: safeName, downloadName });
+    logger.info('History file download started', { fileName: safeName, fullPath, downloadName });
     res.download(fullPath, downloadName);
   });
 
-  // Stream a previously completed file from history for inline playback
   app.get('/api/history/stream/:fileName', historyFileParamValidation, async (req, res) => {
-    const fileName = req.params.fileName;
-    if (!fileName) {
+    const safeName = path.basename(req.params.fileName || '');
+    if (!safeName) {
       return res.status(400).send('Missing fileName');
     }
 
-    const safeName = path.basename(fileName);
-    const fullPath = path.join(downloadDir, safeName);
-    try {
-      await fsPromises.access(fullPath);
-    } catch {
+    const fullPath = await resolveHistoryFilePath(fsPromises, historyIndex, downloadDir, safeName);
+    if (!fullPath) {
       return res.status(404).send('File not found');
     }
 
     const ext = path.extname(safeName).toLowerCase();
-    if (ext === '.mp4') {
-      res.setHeader('Content-Type', 'video/mp4');
-    } else {
-      // Default to TS container for other extensions we expose in history.
-      res.setHeader('Content-Type', 'video/mp2t');
-    }
+    const contentType = HISTORY_STREAM_CONTENT_TYPES[ext] || 'application/octet-stream';
+    res.setHeader('Content-Type', contentType);
 
     try {
       const stats = await fsPromises.stat(fullPath);
@@ -213,7 +345,6 @@ async function registerHistoryRoutes(app, fsPromises, downloadDir, jobs) {
       const range = req.headers.range;
 
       if (range) {
-        // Example: "bytes=start-end"
         const parts = range.replace(/bytes=/, '').split('-');
         const start = parseInt(parts[0], 10);
         const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
@@ -239,7 +370,6 @@ async function registerHistoryRoutes(app, fsPromises, downloadDir, jobs) {
         });
         stream.pipe(res);
       } else {
-        // No range header; stream the whole file.
         res.setHeader('Content-Length', fileSize);
         const stream = fs.createReadStream(fullPath);
         stream.on('error', () => {
@@ -252,7 +382,7 @@ async function registerHistoryRoutes(app, fsPromises, downloadDir, jobs) {
         stream.pipe(res);
       }
     } catch (err) {
-      logger.error('Failed to stream history file', { fileName: safeName, error: err.message });
+      logger.error('Failed to stream history file', { fileName: safeName, fullPath, error: err.message });
       if (!res.headersSent) {
         res.status(500).end('Error reading file');
       } else {
@@ -261,26 +391,77 @@ async function registerHistoryRoutes(app, fsPromises, downloadDir, jobs) {
     }
   });
 
-  // Delete a file from history
   app.delete('/api/history/:fileName', historyFileParamValidation, async (req, res) => {
-    const fileName = req.params.fileName;
-    if (!fileName) {
+    const safeName = path.basename(req.params.fileName || '');
+    if (!safeName) {
       return res.status(400).json({ error: 'Missing fileName' });
     }
 
-    const safeName = path.basename(fileName);
-    const fullPath = path.join(downloadDir, safeName);
-
-    try {
-      await fsPromises.access(fullPath);
-    } catch {
-      logger.warn('History delete requested for missing file', { fileName: safeName, fullPath });
+    const fullPath = await resolveHistoryFilePath(fsPromises, historyIndex, downloadDir, safeName);
+    if (!fullPath) {
+      logger.warn('History delete requested for missing file', { fileName: safeName });
       return res.status(404).json({ error: 'File not found' });
     }
 
     try {
-      await fsPromises.unlink(fullPath);
-      logger.info('History file deleted', { fileName: safeName, fullPath });
+      const jobId = extractJobIdFromArtifactName(safeName);
+      const fileDir = path.dirname(fullPath);
+      const isNestedJobDir = (
+        fileDir !== downloadDir
+        && path.resolve(path.dirname(fileDir)) === path.resolve(downloadDir)
+        && jobId
+        && path.basename(fileDir) === jobId
+      );
+
+      let deleted = [];
+      if (isNestedJobDir) {
+        const entries = await fsPromises.readdir(fileDir, { withFileTypes: true });
+        const filesInDir = entries
+          .filter((entry) => entry.isFile())
+          .map((entry) => path.join(fileDir, entry.name));
+        const managed = filesInDir.filter((candidatePath) => isManagedHistoryArtifactFileName(path.basename(candidatePath)));
+        deleted = await deleteFilePaths(fsPromises, managed);
+
+        try {
+          const remaining = await fsPromises.readdir(fileDir);
+          if (remaining.length === 0) {
+            await fsPromises.rmdir(fileDir);
+          }
+        } catch (err) {
+          if (err && err.code !== 'ENOENT') {
+            logger.warn('Failed to remove empty job history directory', { fileDir, error: err.message });
+          }
+        }
+      } else {
+        const topEntries = await fsPromises.readdir(downloadDir, { withFileTypes: true });
+        const allTopLevelFiles = new Set(
+          topEntries
+            .filter((entry) => entry.isFile())
+            .map((entry) => path.join(downloadDir, entry.name))
+        );
+        const related = buildLegacyRelatedArtifactPaths(fullPath, allTopLevelFiles);
+        deleted = await deleteFilePaths(fsPromises, related);
+      }
+
+      const deletedJobIds = new Set(
+        deleted
+          .map((deletedPath) => extractJobIdFromArtifactName(path.basename(deletedPath)))
+          .filter(Boolean)
+      );
+      await deleteTempDirectoriesForJobIds(fsPromises, downloadDir, deletedJobIds);
+      await removeEmptyDirectories(fsPromises, downloadDir);
+
+      if (typeof historyIndex.refreshFromDisk === 'function') {
+        await historyIndex.refreshFromDisk({ force: true });
+      } else {
+        await historyIndex.removeByFileName(safeName);
+      }
+
+      logger.info('History file deleted', {
+        fileName: safeName,
+        fullPath,
+        artifactsDeleted: deleted.length,
+      });
       res.json({ ok: true });
     } catch (err) {
       logger.error('Failed to delete history file', { fileName: safeName, error: err.message });

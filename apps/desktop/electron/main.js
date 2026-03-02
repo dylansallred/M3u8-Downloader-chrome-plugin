@@ -101,6 +101,57 @@ function getDownloadDirPath() {
   return downloadDir;
 }
 
+function resolveHistoryFilePath(fileName) {
+  const safeName = path.basename(String(fileName || ''));
+  if (!safeName) return null;
+
+  const downloadDir = getDownloadDirPath();
+  const directPath = path.join(downloadDir, safeName);
+  if (fs.existsSync(directPath)) {
+    return directPath;
+  }
+
+  const indexPath = path.join(downloadDir, 'history-index.json');
+  try {
+    const parsed = JSON.parse(fs.readFileSync(indexPath, 'utf8'));
+    const items = Array.isArray(parsed && parsed.items) ? parsed.items : [];
+    const match = items.find((item) => item && item.fileName === safeName);
+    if (match && typeof match.relativePath === 'string') {
+      const normalizedRelative = String(match.relativePath).replace(/\\/g, '/').replace(/^\/+/, '');
+      if (!normalizedRelative.includes('..') && !normalizedRelative.includes('\0')) {
+        const fullPath = path.join(downloadDir, normalizedRelative);
+        if (fs.existsSync(fullPath)) {
+          return fullPath;
+        }
+      }
+    }
+  } catch {
+    // Index read failures fall through to filesystem scan.
+  }
+
+  const pending = [downloadDir];
+  while (pending.length > 0) {
+    const currentDir = pending.pop();
+    let entries = [];
+    try {
+      entries = fs.readdirSync(currentDir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      const fullPath = path.join(currentDir, entry.name);
+      if (entry.isFile() && entry.name === safeName) {
+        return fullPath;
+      }
+      if (entry.isDirectory()) {
+        pending.push(fullPath);
+      }
+    }
+  }
+
+  return null;
+}
+
 function buildSupportBundleDirPath() {
   const now = new Date();
   const stamp = now
@@ -310,6 +361,10 @@ async function startLocalApi() {
     appVersion: app.getVersion(),
     dataDir,
     downloadDir,
+    initialQueueSettings: {
+      maxConcurrent: Number(savedSettings.queueMaxConcurrent) || 1,
+      autoStart: savedSettings.queueAutoStart !== false,
+    },
     onFocus: () => {
       if (!mainWindow || mainWindow.isDestroyed()) return;
       if (mainWindow.isMinimized()) {
@@ -321,6 +376,12 @@ async function startLocalApi() {
   });
 
   await apiServer.start();
+  if (apiServer && typeof apiServer.applyLegacyQueueSettings === 'function') {
+    apiServer.applyLegacyQueueSettings({
+      maxConcurrent: Number(savedSettings.queueMaxConcurrent) || 1,
+      autoStart: savedSettings.queueAutoStart !== false,
+    });
+  }
 }
 
 function createWindow() {
@@ -382,21 +443,61 @@ function registerIpc() {
     apiVersion: API.apiVersion,
   }));
 
-  ipcMain.handle('settings:get', async () => readSettings());
+  ipcMain.handle('settings:get', async () => {
+    const saved = readSettings();
+    const queueSettings = apiServer && typeof apiServer.getQueueSettings === 'function'
+      ? apiServer.getQueueSettings()
+      : null;
+
+    if (queueSettings) {
+      return {
+        ...saved,
+        queueMaxConcurrent: Number(queueSettings.maxConcurrent) || 1,
+        queueAutoStart: queueSettings.autoStart !== false,
+      };
+    }
+
+    return saved;
+  });
 
   ipcMain.handle('settings:save', async (event, nextSettings) => {
-    const merged = writeSettings(nextSettings || {});
+    const input = nextSettings || {};
+    const queuePatch = {};
+    if (typeof input.queueMaxConcurrent === 'number') {
+      queuePatch.maxConcurrent = Math.max(1, Math.min(16, Number(input.queueMaxConcurrent) || 1));
+    }
+    if (typeof input.queueAutoStart === 'boolean') {
+      queuePatch.autoStart = input.queueAutoStart;
+    }
+    if (
+      Object.keys(queuePatch).length > 0
+      && apiServer
+      && typeof apiServer.updateQueueSettings === 'function'
+    ) {
+      apiServer.updateQueueSettings(queuePatch);
+    }
+
+    // Keep legacy queue keys readable for compatibility, but runtime canonical
+    // values come from queue settings in queue.json.
+    const merged = writeSettings(input);
     const apiConfig = require('@m3u8/downloader-api/src/config');
-    if ('tmdbApiKey' in (nextSettings || {})) {
+    if ('tmdbApiKey' in input) {
       apiConfig.tmdbApiKey = merged.tmdbApiKey || '';
     }
-    if ('subdlApiKey' in (nextSettings || {})) {
+    if ('subdlApiKey' in input) {
       apiConfig.subdlApiKey = merged.subdlApiKey || '';
     }
-    if ('downloadThreads' in (nextSettings || {})) {
+    if ('downloadThreads' in input) {
       apiConfig.downloadThreads = Number(merged.downloadThreads) || 0;
     }
-    return merged;
+    const queueSettings = apiServer && typeof apiServer.getQueueSettings === 'function'
+      ? apiServer.getQueueSettings()
+      : null;
+    return {
+      ...merged,
+      queueMaxConcurrent: Number(queueSettings?.maxConcurrent || merged.queueMaxConcurrent || 1),
+      queueAutoStart: (queueSettings?.autoStart ?? merged.queueAutoStart) !== false,
+    };
   });
 
   ipcMain.handle('app:save-diagnostics-file', async (event, payload) => {
@@ -428,8 +529,8 @@ function registerIpc() {
       if (!safeName) {
         return { ok: false, error: 'Missing file name' };
       }
-      const filePath = path.join(getDownloadDirPath(), safeName);
-      if (!fs.existsSync(filePath)) {
+      const filePath = resolveHistoryFilePath(safeName);
+      if (!filePath || !fs.existsSync(filePath)) {
         return { ok: false, error: 'File not found' };
       }
       const openResult = await shell.openPath(filePath);
@@ -448,8 +549,8 @@ function registerIpc() {
       if (!safeName) {
         return { ok: false, error: 'Missing file name' };
       }
-      const filePath = path.join(getDownloadDirPath(), safeName);
-      if (!fs.existsSync(filePath)) {
+      const filePath = resolveHistoryFilePath(safeName);
+      if (!filePath || !fs.existsSync(filePath)) {
         return { ok: false, error: 'File not found' };
       }
       shell.showItemInFolder(filePath);

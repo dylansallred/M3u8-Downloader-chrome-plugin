@@ -3,6 +3,15 @@ import type { HistoryItem } from '@/types/history';
 import { createApiClient } from '@/lib/api';
 import { toast } from 'sonner';
 
+const FALLBACK_POLL_MS = 10_000;
+const WS_RECONNECT_BASE_MS = 1_000;
+const WS_RECONNECT_MAX_MS = 12_000;
+const WS_CONNECT_DEFER_MS = 80;
+
+function toWebSocketUrl(apiBase: string): string {
+  return apiBase.replace(/^http/i, 'ws').replace(/\/+$/, '') + '/ws';
+}
+
 export function useHistory(apiBase: string) {
   const [items, setItems] = useState<HistoryItem[]>([]);
   const [filterText, setFilterText] = useState('');
@@ -16,10 +25,121 @@ export function useHistory(apiBase: string) {
   }, [api]);
 
   useEffect(() => {
-    loadHistory();
-    const timer = setInterval(loadHistory, 2000);
-    return () => clearInterval(timer);
-  }, [loadHistory]);
+    let disposed = false;
+    let ws: WebSocket | null = null;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let connectTimer: ReturnType<typeof setTimeout> | null = null;
+    let fallbackTimer: ReturnType<typeof setInterval> | null = null;
+    let reconnectDelay = WS_RECONNECT_BASE_MS;
+
+    const stopFallbackPolling = () => {
+      if (fallbackTimer) {
+        clearInterval(fallbackTimer);
+        fallbackTimer = null;
+      }
+    };
+
+    const startFallbackPolling = () => {
+      if (fallbackTimer || disposed) return;
+      fallbackTimer = setInterval(() => {
+        loadHistory().catch(() => {
+          // keep fallback polling active
+        });
+      }, FALLBACK_POLL_MS);
+    };
+
+    const scheduleReconnect = () => {
+      if (disposed || reconnectTimer) return;
+      reconnectTimer = setTimeout(() => {
+        reconnectTimer = null;
+        scheduleConnect();
+      }, reconnectDelay);
+      reconnectDelay = Math.min(WS_RECONNECT_MAX_MS, reconnectDelay * 2);
+    };
+
+    const connect = () => {
+      if (disposed) return;
+      let socket: WebSocket;
+      try {
+        socket = new WebSocket(toWebSocketUrl(apiBase));
+      } catch {
+        startFallbackPolling();
+        scheduleReconnect();
+        return;
+      }
+      ws = socket;
+
+      socket.onopen = () => {
+        if (disposed) {
+          socket.close();
+          return;
+        }
+        reconnectDelay = WS_RECONNECT_BASE_MS;
+        stopFallbackPolling();
+        socket.send(JSON.stringify({ type: 'subscribe', channel: 'history' }));
+      };
+
+      socket.onmessage = (event) => {
+        if (disposed) return;
+        try {
+          const message = JSON.parse(String(event.data || ''));
+          if (message?.type !== 'history:update') return;
+          loadHistory().catch(() => {
+            // keep running; fallback polling handles transient failures
+          });
+        } catch {
+          // Ignore malformed websocket payloads.
+        }
+      };
+
+      socket.onerror = () => {
+        // onclose handles reconnect/poll fallback
+      };
+
+      socket.onclose = () => {
+        if (disposed) return;
+        startFallbackPolling();
+        scheduleReconnect();
+      };
+    };
+
+    const scheduleConnect = () => {
+      if (disposed || connectTimer) return;
+      connectTimer = setTimeout(() => {
+        connectTimer = null;
+        connect();
+      }, WS_CONNECT_DEFER_MS);
+    };
+
+    loadHistory().catch(() => {
+      // initial load best-effort
+    });
+    startFallbackPolling();
+    scheduleConnect();
+
+    return () => {
+      disposed = true;
+      stopFallbackPolling();
+      if (connectTimer) {
+        clearTimeout(connectTimer);
+        connectTimer = null;
+      }
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+      }
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.close();
+      }
+      if (ws && ws.readyState === WebSocket.CONNECTING) {
+        // Avoid "closed before established" warnings in React StrictMode.
+        ws.onopen = () => ws?.close();
+        ws.onmessage = null;
+        ws.onerror = null;
+        ws.onclose = null;
+      }
+    };
+  }, [apiBase, loadHistory]);
 
   const visibleItems = useMemo(() => {
     const text = String(filterText || '').trim().toLowerCase();

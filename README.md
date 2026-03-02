@@ -99,6 +99,8 @@ GitHub release workflow (tags `v*.*.*`) is in `.github/workflows/release.yml`.
   - `test-and-build`
   - `e2e`
 - Local equivalents:
+  - `npm run lint`
+  - `npm run typecheck:desktop`
   - `npm test`
   - `npm run test:e2e -- --project=chromium`
   - `npm run build:desktop`

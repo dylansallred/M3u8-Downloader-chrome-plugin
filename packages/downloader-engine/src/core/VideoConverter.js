@@ -10,6 +10,18 @@ async function remuxAndGenerateThumbnails(job, filePathFinal, {
   skipThumbnailGeneration = false,
 }) {
   try {
+    const outputDir = (() => {
+      if (job && typeof job.storageDir === 'string' && job.storageDir.trim()) {
+        return job.storageDir;
+      }
+      if (job && typeof job.filePath === 'string' && job.filePath.trim()) {
+        return path.dirname(job.filePath);
+      }
+      return downloadDir;
+    })();
+    job.storageDir = outputDir;
+    fs.mkdirSync(outputDir, { recursive: true });
+
     if (!FFMPEG_PATH) {
       logger.warn('TS->MP4 remux skipped - FFmpeg not available (using TS as fallback)', {
         jobId: job.id,
@@ -18,7 +30,7 @@ async function remuxAndGenerateThumbnails(job, filePathFinal, {
       job.thumbnailPath = null;
       throw new Error('FFmpeg not available');
     }
-    const mp4Path = path.join(downloadDir, `${job.id}-${job.downloadNameMp4}`);
+    const mp4Path = path.join(outputDir, `${job.id}-${job.downloadNameMp4}`);
 
     const hasSubtitle = (() => {
       if (!job.subtitlePath || !fs.existsSync(job.subtitlePath)) {
@@ -69,7 +81,7 @@ async function remuxAndGenerateThumbnails(job, filePathFinal, {
 
       if (useConcatDemuxer) {
         try {
-          concatListPath = concatListPath || path.join(downloadDir, `ts-parts-${job.id}.txt`);
+          concatListPath = concatListPath || path.join(outputDir, `ts-parts-${job.id}.txt`);
           const listLines = job.tsParts.map(p => `file '${p.replace(/'/g, "'\\''")}'`).join('\n');
           fs.writeFileSync(concatListPath, listLines, 'utf8');
         } catch (err) {
@@ -222,7 +234,7 @@ async function remuxAndGenerateThumbnails(job, filePathFinal, {
         // Seek to 10% into the video or 5 seconds (whichever is less) so we
         // land past title cards but don't overshoot short clips.
         const seekTime = duration > 0 ? Math.min(duration * 0.1, 5) : 1;
-        const thumbPath = path.join(downloadDir, `${job.id}-thumb.jpg`);
+        const thumbPath = path.join(outputDir, `${job.id}-thumb.jpg`);
 
         logger.info('Extracting thumbnail frame', {
           jobId: job.id,

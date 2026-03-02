@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Stream Player</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #0b1020;
+        --surface: rgba(23, 29, 50, 0.7);
+        --surface-border: rgba(42, 53, 88, 0.7);
+        --text: #ecf2ff;
+        --muted: #8a9dc4;
+        --accent: #31c48d;
+        --warn: #f59e0b;
+        --error: #ef4444;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: "Inter", "Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif;
+        color: var(--text);
+        background: linear-gradient(160deg, #111833, var(--bg));
+      }
+
+      .layout {
+        width: min(1120px, calc(100vw - 32px));
+        margin: 16px auto 22px;
+      }
+
+      .card {
+        background: var(--surface);
+        border: 1px solid var(--surface-border);
+        border-radius: 14px;
+        padding: 14px 16px;
+        backdrop-filter: blur(14px);
+      }
+
+      .title {
+        margin: 0;
+        font-size: 18px;
+        line-height: 1.2;
+      }
+
+      .sub {
+        margin: 8px 0 0;
+        color: var(--muted);
+        font-size: 12px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .status {
+        margin: 8px 0 0;
+        font-size: 12px;
+      }
+
+      .status.ok {
+        color: var(--accent);
+      }
+
+      .status.warn {
+        color: var(--warn);
+      }
+
+      .status.error {
+        color: var(--error);
+      }
+
+      .video-wrap {
+        margin-top: 12px;
+        border-radius: 12px;
+        overflow: hidden;
+        border: 1px solid var(--surface-border);
+        background: #000;
+      }
+
+      video {
+        width: 100%;
+        height: min(76vh, 760px);
+        display: block;
+        background: #000;
+      }
+
+      .actions {
+        margin-top: 12px;
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+
+      button {
+        border: 1px solid var(--surface-border);
+        background: rgba(17, 24, 49, 0.8);
+        color: var(--text);
+        border-radius: 8px;
+        padding: 8px 12px;
+        font-size: 13px;
+        cursor: pointer;
+      }
+
+      button:hover {
+        border-color: rgba(49, 196, 141, 0.45);
+      }
+
+      button:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+
+      .meta {
+        margin-top: 10px;
+        color: var(--muted);
+        font-size: 11px;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="layout">
+      <section class="card">
+        <h1 id="title" class="title">Stream Player</h1>
+        <p id="source" class="sub"></p>
+        <p id="status" class="status">Preparing stream...</p>
+
+        <div class="video-wrap">
+          <video id="player" controls playsinline preload="metadata"></video>
+        </div>
+
+        <div class="actions">
+          <button id="openSourceBtn" type="button">Open Source URL</button>
+          <button id="openFallbackBtn" type="button">Open Fallback URL</button>
+          <button id="retryBtn" type="button">Retry</button>
+        </div>
+
+        <p class="meta">
+          HLS playback depends on source accessibility (token/cookie/CORS). If blocked, use fallback or open source URL.
+        </p>
+      </section>
+    </main>
+
+    <script src="vendor/hls.min.js"></script>
+    <script src="player.js"></script>
+  </body>
+</html>

@@ -3,6 +3,8 @@ const MAX_PAGE_TITLE_CANDIDATES = 24;
 const MAX_RESOURCE_SIGNALS = 20;
 const SEGMENT_MANIFEST_CACHE_TTL_MS = 2 * 60 * 1000;
 const SEGMENT_MANIFEST_CACHE_MAX = 300;
+const STREAM_SESSION_TTL_MS = 10 * 60 * 1000;
+const STREAM_SESSION_KEY_PREFIX = 'streamSession:';
 
 const segmentManifestCache = new Map();
 const segmentManifestInflight = new Map();
@@ -11,9 +13,42 @@ function getStorageKey(tabId) {
   return `storage${tabId}`;
 }
 
+function getStreamSessionKey(sessionId) {
+  return `${STREAM_SESSION_KEY_PREFIX}${sessionId}`;
+}
+
 function sanitizeText(value, max = 255) {
   if (typeof value !== 'string') return '';
   return value.trim().slice(0, max);
+}
+
+function sanitizeRequestHeaders(headers) {
+  if (!headers || typeof headers !== 'object') return {};
+  const blocked = new Set([
+    'origin',
+    'referer',
+    'host',
+    'user-agent',
+    'cookie',
+    'content-length',
+    'connection',
+  ]);
+
+  const output = {};
+  const entries = Object.entries(headers);
+  for (const [rawKey, rawValue] of entries) {
+    const key = String(rawKey || '').trim();
+    const value = String(rawValue || '').trim();
+    if (!key || !value) continue;
+    const lower = key.toLowerCase();
+    if (blocked.has(lower)) continue;
+    if (lower.startsWith('sec-')) continue;
+    if (lower.startsWith('proxy-')) continue;
+    if (lower.startsWith(':')) continue;
+    output[key.slice(0, 64)] = value.slice(0, 1000);
+    if (Object.keys(output).length >= 30) break;
+  }
+  return output;
 }
 
 function sanitizePageTitleCandidates(value) {
@@ -383,6 +418,75 @@ async function removeMediaItem(tabId, itemId) {
   return { ok: true, removed: true, count: next.length };
 }
 
+async function cleanupExpiredStreamSessions() {
+  const all = await chrome.storage.local.get(null);
+  const now = Date.now();
+  const staleKeys = [];
+
+  for (const [key, value] of Object.entries(all || {})) {
+    if (!key.startsWith(STREAM_SESSION_KEY_PREFIX)) continue;
+    const createdAt = Number(value && value.createdAt || 0);
+    if (!Number.isFinite(createdAt) || now - createdAt > STREAM_SESSION_TTL_MS) {
+      staleKeys.push(key);
+    }
+  }
+
+  if (staleKeys.length > 0) {
+    await chrome.storage.local.remove(staleKeys);
+  }
+}
+
+async function createStreamSession(payload = {}) {
+  await cleanupExpiredStreamSessions();
+
+  const sessionId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  const sourceUrl = sanitizeText(payload.sourceUrl || payload.src, 4096);
+  const fallbackUrl = sanitizeText(payload.fallbackUrl || payload.fallback, 4096);
+  const declaredType = sanitizeText(payload.declaredType || payload.type, 16).toLowerCase();
+  const title = sanitizeText(payload.title, 255) || 'Stream Player';
+  const sourcePageUrl = sanitizeText(payload.sourcePageUrl, 4096);
+
+  if (!sourceUrl && !fallbackUrl) {
+    return { ok: false, error: 'Missing stream URL' };
+  }
+
+  const session = {
+    id: sessionId,
+    createdAt: Date.now(),
+    sourceUrl,
+    fallbackUrl,
+    declaredType: declaredType === 'hls' ? 'hls' : (declaredType === 'file' ? 'file' : ''),
+    title,
+    sourcePageUrl,
+    requestHeaders: sanitizeRequestHeaders(payload.requestHeaders),
+  };
+
+  await chrome.storage.local.set({ [getStreamSessionKey(sessionId)]: session });
+  return { ok: true, sessionId };
+}
+
+async function getStreamSession(sessionId) {
+  const safeSessionId = sanitizeText(sessionId, 80);
+  if (!safeSessionId) {
+    return { ok: false, error: 'Missing session id' };
+  }
+
+  const key = getStreamSessionKey(safeSessionId);
+  const result = await chrome.storage.local.get([key]);
+  const session = result && result[key];
+  if (!session || typeof session !== 'object') {
+    return { ok: false, error: 'Session not found' };
+  }
+
+  const ageMs = Date.now() - Number(session.createdAt || 0);
+  if (!Number.isFinite(ageMs) || ageMs > STREAM_SESSION_TTL_MS) {
+    await chrome.storage.local.remove([key]);
+    return { ok: false, error: 'Session expired' };
+  }
+
+  return { ok: true, session };
+}
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const cmd = message && message.cmd;
 
@@ -454,6 +558,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       id: chrome.runtime.id,
       version: chrome.runtime.getManifest().version,
     });
+    return true;
+  }
+
+  if (cmd === 'CREATE_STREAM_SESSION') {
+    createStreamSession(message && message.session ? message.session : {})
+      .then(sendResponse)
+      .catch((err) => sendResponse({ ok: false, error: err.message || String(err) }));
+    return true;
+  }
+
+  if (cmd === 'GET_STREAM_SESSION') {
+    getStreamSession(message && message.sessionId)
+      .then(sendResponse)
+      .catch((err) => sendResponse({ ok: false, error: err.message || String(err) }));
     return true;
   }
 

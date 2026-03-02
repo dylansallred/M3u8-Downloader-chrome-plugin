@@ -2,6 +2,7 @@ const express = require('express');
 const path = require('path');
 const fs = require('fs');
 const http = require('http');
+const https = require('https');
 const { URL } = require('url');
 const { execSync } = require('child_process');
 const WebSocket = require('ws');
@@ -17,10 +18,16 @@ const {
 const registerHistoryRoutes = require('./routes/history');
 const registerQueueRoutes = require('./routes/queue');
 const registerJobRoutes = require('./routes/jobs');
+const { HistoryIndexService } = require('./services/historyIndex');
 const logger = require('./utils/logger');
 const { inferMediaMetadata } = require('./utils/mediaMetadata');
 const { lookupPoster } = require('./services/tmdb');
+const { buildDownloadAssetUrl, buildJobStorageDir } = require('./utils/downloadPaths');
 const appConfig = require('./config');
+
+const TMDB_CACHE_VERSION = 1;
+const TMDB_CACHE_MAX_ENTRIES = 2000;
+const TMDB_CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
 function detectFFmpegPath(explicitPath) {
   const possiblePaths = [
@@ -56,6 +63,7 @@ function createApiServer(options = {}) {
     appVersion = '0.0.0',
     dataDir,
     downloadDir,
+    initialQueueSettings,
     ffmpegPath,
     ffprobePath,
     onFocus,
@@ -156,7 +164,9 @@ function createApiServer(options = {}) {
     return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   }
 
-  function getJobTempDirForUrl(m3u8Url) {
+  function getJobTempDirForUrl(m3u8Url, jobId = '') {
+    const safeJobId = safeFilename(String(jobId || '')).slice(0, 48);
+    const suffix = safeJobId ? `-${safeJobId}` : '';
     try {
       const u = new URL(m3u8Url);
       const base = `${u.hostname}${u.pathname}`;
@@ -164,10 +174,10 @@ function createApiServer(options = {}) {
         .replace(/[^a-z0-9._-]+/gi, '_')
         .replace(/^_+|_+$/g, '')
         .slice(0, 64) || 'playlist';
-      return path.join(resolvedDownloadDir, `temp-${slug}`);
+      return path.join(resolvedDownloadDir, `temp-${slug}${suffix}`);
     } catch {
       const slug = safeFilename(String(m3u8Url)).replace(/\.[a-z0-9]{2,4}$/i, '');
-      return path.join(resolvedDownloadDir, `temp-${slug}`);
+      return path.join(resolvedDownloadDir, `temp-${slug}${suffix}`);
     }
   }
 
@@ -196,20 +206,32 @@ function createApiServer(options = {}) {
     jobs,
     runJob,
     runDirectJob,
+    initialSettings: initialQueueSettings,
+  });
+
+  let notifyHistoryChange = () => {};
+  const historyIndex = new HistoryIndexService({
+    downloadDir: resolvedDownloadDir,
+    fsPromises,
+    jobs,
+    onChange: (payload) => notifyHistoryChange(payload),
   });
 
   function mergeThumbnailUrls(job) {
     const localThumbs = Array.isArray(job.thumbnailPaths)
-      ? job.thumbnailPaths.filter((p) => fs.existsSync(p)).map((p) => `/downloads/${path.basename(p)}`)
+      ? job.thumbnailPaths
+        .filter((p) => fs.existsSync(p))
+        .map((p) => buildDownloadAssetUrl(resolvedDownloadDir, p))
+        .filter(Boolean)
       : (job.thumbnailPath && fs.existsSync(job.thumbnailPath)
-        ? [`/downloads/${path.basename(job.thumbnailPath)}`]
+        ? [buildDownloadAssetUrl(resolvedDownloadDir, job.thumbnailPath)].filter(Boolean)
         : []);
 
     const remoteThumbs = Array.isArray(job.thumbnailUrls)
       ? job.thumbnailUrls.filter((u) => typeof u === 'string' && u.startsWith('http'))
       : [];
 
-    return [...remoteThumbs, ...localThumbs];
+    return [...localThumbs, ...remoteThumbs];
   }
 
   function buildJobStatusPayload(job) {
@@ -309,6 +331,7 @@ function createApiServer(options = {}) {
     let directFallbackFilePath = null;
     let directFallbackDownloadName = null;
     let directFallbackDownloadNameMp4 = null;
+    const storageDir = buildJobStorageDir(resolvedDownloadDir, id);
 
     if (isHls) {
       tsName = fileNameBase;
@@ -318,7 +341,7 @@ function createApiServer(options = {}) {
         tsName = `${tsName}.ts`;
       }
 
-      filePath = path.join(resolvedDownloadDir, `${id}-${tsName}`);
+      filePath = path.join(storageDir, `${id}-${tsName}`);
 
       downloadNameMp4 = fileNameBase;
       if (/\.m3u8$/i.test(downloadNameMp4)) {
@@ -342,7 +365,7 @@ function createApiServer(options = {}) {
 
         directFallbackDownloadName = `${fileNameBase}${ext}`;
         directFallbackDownloadNameMp4 = directFallbackDownloadName;
-        directFallbackFilePath = path.join(resolvedDownloadDir, `${id}-${directFallbackDownloadName}`);
+        directFallbackFilePath = path.join(storageDir, `${id}-${directFallbackDownloadName}`);
       }
     } else {
       let ext = '';
@@ -358,7 +381,7 @@ function createApiServer(options = {}) {
       }
 
       const directName = `${fileNameBase}${ext}`;
-      filePath = path.join(resolvedDownloadDir, `${id}-${directName}`);
+      filePath = path.join(storageDir, `${id}-${directName}`);
       tsName = directName;
       downloadNameMp4 = directName;
     }
@@ -377,6 +400,7 @@ function createApiServer(options = {}) {
       bytesDownloaded: 0,
       progress: 0,
       error: null,
+      storageDir,
       filePath,
       downloadName: tsName,
       mp4Path: null,
@@ -418,6 +442,238 @@ function createApiServer(options = {}) {
     return { job, isHls };
   }
 
+  const tmdbCacheFilePath = path.join(dataDir, 'tmdb-cache.json');
+  const tmdbCache = new Map();
+  let tmdbCacheLoaded = false;
+  let tmdbCacheLoadPromise = null;
+
+  function buildTmdbCacheKey(title, type) {
+    const normalizedTitle = String(title || '')
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, ' ')
+      .slice(0, 200);
+    const normalizedType = type === 'tv' ? 'tv' : 'movie';
+    return `${normalizedType}:${normalizedTitle}`;
+  }
+
+  function sanitizeTmdbResult(result) {
+    if (!result || typeof result !== 'object') return null;
+    return {
+      id: result.id || null,
+      title: result.title || null,
+      releaseDate: result.releaseDate || null,
+      posterUrl: result.posterUrl || null,
+      backdropUrl: result.backdropUrl || null,
+      overview: result.overview || null,
+      runtime: Number.isFinite(result.runtime) ? result.runtime : null,
+      tagline: result.tagline || null,
+      genres: Array.isArray(result.genres) ? result.genres.filter(Boolean).slice(0, 6) : [],
+      imageUrls: Array.isArray(result.imageUrls)
+        ? result.imageUrls.filter((url) => typeof url === 'string' && isValidHttpUrl(url)).slice(0, 6)
+        : [],
+      mediaType: result.mediaType === 'tv' ? 'tv' : 'movie',
+    };
+  }
+
+  async function loadTmdbCache() {
+    if (tmdbCacheLoaded) return;
+    if (tmdbCacheLoadPromise) {
+      await tmdbCacheLoadPromise;
+      return;
+    }
+
+    tmdbCacheLoadPromise = (async () => {
+      try {
+        const raw = await fsPromises.readFile(tmdbCacheFilePath, 'utf8');
+        const parsed = JSON.parse(raw);
+        const entries = parsed && typeof parsed.entries === 'object' ? parsed.entries : {};
+        const now = Date.now();
+        Object.entries(entries).forEach(([cacheKey, entry]) => {
+          if (!cacheKey || !entry || typeof entry !== 'object') return;
+          const cachedAt = Number(entry.cachedAt || 0);
+          if (!Number.isFinite(cachedAt) || now - cachedAt > TMDB_CACHE_TTL_MS) return;
+          const sanitized = sanitizeTmdbResult(entry.result);
+          if (!sanitized) return;
+          tmdbCache.set(cacheKey, { cachedAt, result: sanitized });
+        });
+      } catch (err) {
+        if (err && err.code !== 'ENOENT') {
+          logger.warn('Failed to load TMDB cache file', { error: err.message });
+        }
+      } finally {
+        tmdbCacheLoaded = true;
+      }
+    })();
+
+    await tmdbCacheLoadPromise;
+  }
+
+  async function persistTmdbCache() {
+    try {
+      await fsPromises.mkdir(path.dirname(tmdbCacheFilePath), { recursive: true });
+      const payload = {
+        version: TMDB_CACHE_VERSION,
+        updatedAt: Date.now(),
+        entries: Object.fromEntries(tmdbCache.entries()),
+      };
+      const tempPath = `${tmdbCacheFilePath}.tmp`;
+      await fsPromises.writeFile(tempPath, JSON.stringify(payload, null, 2), 'utf8');
+      await fsPromises.rename(tempPath, tmdbCacheFilePath);
+    } catch (err) {
+      logger.warn('Failed to persist TMDB cache file', { error: err.message });
+    }
+  }
+
+  async function getCachedTmdbResult(cacheKey) {
+    await loadTmdbCache();
+    const entry = tmdbCache.get(cacheKey);
+    if (!entry) return null;
+
+    if (Date.now() - Number(entry.cachedAt || 0) > TMDB_CACHE_TTL_MS) {
+      tmdbCache.delete(cacheKey);
+      persistTmdbCache();
+      return null;
+    }
+
+    return sanitizeTmdbResult(entry.result);
+  }
+
+  async function cacheTmdbResult(cacheKey, result) {
+    const sanitized = sanitizeTmdbResult(result);
+    if (!sanitized) return;
+    await loadTmdbCache();
+    tmdbCache.set(cacheKey, {
+      cachedAt: Date.now(),
+      result: sanitized,
+    });
+    while (tmdbCache.size > TMDB_CACHE_MAX_ENTRIES) {
+      const oldestKey = tmdbCache.keys().next().value;
+      if (!oldestKey) break;
+      tmdbCache.delete(oldestKey);
+    }
+    await persistTmdbCache();
+  }
+
+  function downloadRemoteImage(url, destinationPath, redirectBudget = 3) {
+    return new Promise((resolve) => {
+      if (!isValidHttpUrl(url)) {
+        resolve(false);
+        return;
+      }
+
+      const parsed = new URL(url);
+      const client = parsed.protocol === 'https:' ? https : http;
+      const tempPath = `${destinationPath}.tmp`;
+      let settled = false;
+
+      const settle = (value) => {
+        if (settled) return;
+        settled = true;
+        resolve(value);
+      };
+
+      const req = client.get(url, {
+        timeout: 12000,
+        headers: { 'User-Agent': 'M3U8-Downloader/1.0' },
+      }, (res) => {
+        const status = Number(res.statusCode || 0);
+        if (status >= 300 && status < 400 && res.headers.location && redirectBudget > 0) {
+          res.resume();
+          const redirected = new URL(String(res.headers.location), url).toString();
+          downloadRemoteImage(redirected, destinationPath, redirectBudget - 1).then(settle);
+          return;
+        }
+
+        if (status < 200 || status >= 300) {
+          res.resume();
+          settle(false);
+          return;
+        }
+
+        const out = fs.createWriteStream(tempPath);
+        out.on('error', async () => {
+          try { await fsPromises.unlink(tempPath); } catch {}
+          settle(false);
+        });
+
+        res.on('error', async () => {
+          try { await fsPromises.unlink(tempPath); } catch {}
+          settle(false);
+        });
+
+        out.on('finish', async () => {
+          try {
+            await fsPromises.rename(tempPath, destinationPath);
+            settle(true);
+          } catch {
+            try { await fsPromises.unlink(tempPath); } catch {}
+            settle(false);
+          }
+        });
+
+        res.pipe(out);
+      });
+
+      req.on('timeout', () => {
+        req.destroy(new Error('timeout'));
+      });
+      req.on('error', () => {
+        settle(false);
+      });
+    });
+  }
+
+  async function ensureLocalTmdbThumbnail(job) {
+    const remoteThumb = Array.isArray(job.thumbnailUrls)
+      ? job.thumbnailUrls.find((url) => isValidHttpUrl(url))
+      : null;
+    if (!remoteThumb) return false;
+
+    const storageDir = job.storageDir || (job.filePath ? path.dirname(job.filePath) : resolvedDownloadDir);
+    const thumbPath = path.join(storageDir, `${job.id}-thumb.jpg`);
+    try {
+      await fsPromises.mkdir(storageDir, { recursive: true });
+      if (fs.existsSync(thumbPath)) {
+        job.thumbnailPath = thumbPath;
+        return true;
+      }
+      const downloaded = await downloadRemoteImage(remoteThumb, thumbPath);
+      if (!downloaded) {
+        return false;
+      }
+      job.thumbnailPath = thumbPath;
+      return true;
+    } catch (err) {
+      logger.warn('Failed to persist TMDB thumbnail locally', {
+        jobId: job.id,
+        thumbPath,
+        error: err.message,
+      });
+      return false;
+    }
+  }
+
+  function applyTmdbResultToJob(job, result, fallbackType) {
+    const mediaType = result && result.mediaType === 'tv'
+      ? 'tv'
+      : (fallbackType === 'tv' ? 'tv' : 'movie');
+    job.thumbnailUrls = Array.isArray(result && result.imageUrls)
+      ? result.imageUrls.filter(Boolean)
+      : [result && result.posterUrl, result && result.backdropUrl].filter(Boolean);
+    job.tmdbId = (result && result.id) || null;
+    job.tmdbTitle = (result && result.title) || null;
+    job.tmdbReleaseDate = (result && result.releaseDate) || null;
+    job.tmdbMetadata = {
+      overview: (result && result.overview) || null,
+      runtime: (result && result.runtime) || null,
+      tagline: (result && result.tagline) || null,
+      genres: Array.isArray(result && result.genres) ? result.genres : [],
+      mediaType,
+    };
+    job.skipThumbnailGeneration = true;
+  }
+
   async function enrichTmdb(job) {
     if (!appConfig.tmdbApiKey) return;
 
@@ -430,42 +686,41 @@ function createApiServer(options = {}) {
       });
       const lookupTitle = hints.lookupTitle || job.title || job.downloadName;
       const type = hints.isTvCandidate ? 'tv' : 'movie';
-      logger.info('TMDB lookup start', {
-        jobId: job.id,
-        title: lookupTitle,
-        type,
-        seasonNumber: hints.seasonNumber,
-        episodeNumber: hints.episodeNumber,
-        matchedPattern: hints.matchedPattern,
-        matchedField: hints.matchedField,
-      });
-      const result = await lookupPoster({
-        apiKey: appConfig.tmdbApiKey,
-        title: lookupTitle,
-        type,
-      });
+      const cacheKey = buildTmdbCacheKey(lookupTitle, type);
+      let result = await getCachedTmdbResult(cacheKey);
+      const usedCache = !!result;
+
+      if (!result) {
+        logger.info('TMDB lookup start', {
+          jobId: job.id,
+          title: lookupTitle,
+          type,
+          seasonNumber: hints.seasonNumber,
+          episodeNumber: hints.episodeNumber,
+          matchedPattern: hints.matchedPattern,
+          matchedField: hints.matchedField,
+        });
+        result = await lookupPoster({
+          apiKey: appConfig.tmdbApiKey,
+          title: lookupTitle,
+          type,
+        });
+        if (result) {
+          await cacheTmdbResult(cacheKey, result);
+        }
+      }
 
       if (result) {
-        job.thumbnailUrls = Array.isArray(result.imageUrls)
-          ? result.imageUrls.filter(Boolean)
-          : [result.posterUrl, result.backdropUrl].filter(Boolean);
-        job.tmdbId = result.id;
-        job.tmdbTitle = result.title;
-        job.tmdbReleaseDate = result.releaseDate;
-        job.tmdbMetadata = {
-          overview: result.overview,
-          runtime: result.runtime,
-          tagline: result.tagline,
-          genres: result.genres,
-          mediaType: result.mediaType || type,
-        };
-        job.skipThumbnailGeneration = true;
+        applyTmdbResultToJob(job, result, type);
+        const localThumbSaved = await ensureLocalTmdbThumbnail(job);
         queueManager.saveQueue();
-        logger.info('TMDB lookup success', {
+        logger.info('TMDB metadata applied', {
           jobId: job.id,
           tmdbId: result.id,
-          mediaType: result.mediaType || type,
-          thumbnails: job.thumbnailUrls.length,
+          mediaType: (result.mediaType || type),
+          thumbnails: Array.isArray(job.thumbnailUrls) ? job.thumbnailUrls.length : 0,
+          localThumbSaved,
+          cacheHit: usedCache,
         });
       } else {
         logger.info('TMDB lookup returned no results', { jobId: job.id, title: lookupTitle, type });
@@ -887,7 +1142,7 @@ function createApiServer(options = {}) {
     });
   });
 
-  registerHistoryRoutes(app, fsPromises, resolvedDownloadDir, jobs);
+  registerHistoryRoutes(app, historyIndex, fsPromises, resolvedDownloadDir);
   registerQueueRoutes(app, queueManager);
   registerJobRoutes(
     app,
@@ -904,18 +1159,22 @@ function createApiServer(options = {}) {
 
   const wss = new WebSocket.Server({ server, path: '/ws' });
   const jobSubscriptions = new Map();
+  const channelSubscriptions = new Map();
   const clientSubscriptions = new Map();
   const lastSentTimestamps = new Map();
+  let lastQueueSignature = '';
+
+  const CHANNELS = new Set(['queue', 'history', 'compatibility']);
 
   function subscribeClientToJob(ws, jobId) {
     if (!jobId) return;
 
-    let jobsForClient = clientSubscriptions.get(ws);
-    if (!jobsForClient) {
-      jobsForClient = new Set();
-      clientSubscriptions.set(ws, jobsForClient);
+    let subscriptions = clientSubscriptions.get(ws);
+    if (!subscriptions) {
+      subscriptions = { jobs: new Set(), channels: new Set() };
+      clientSubscriptions.set(ws, subscriptions);
     }
-    jobsForClient.add(jobId);
+    subscriptions.jobs.add(jobId);
 
     let subscribers = jobSubscriptions.get(jobId);
     if (!subscribers) {
@@ -925,11 +1184,30 @@ function createApiServer(options = {}) {
     subscribers.add(ws);
   }
 
-  function unsubscribeClient(ws) {
-    const jobsForClient = clientSubscriptions.get(ws);
-    if (!jobsForClient) return;
+  function subscribeClientToChannel(ws, channel) {
+    if (!CHANNELS.has(channel)) return false;
 
-    jobsForClient.forEach((jobId) => {
+    let subscriptions = clientSubscriptions.get(ws);
+    if (!subscriptions) {
+      subscriptions = { jobs: new Set(), channels: new Set() };
+      clientSubscriptions.set(ws, subscriptions);
+    }
+    subscriptions.channels.add(channel);
+
+    let subscribers = channelSubscriptions.get(channel);
+    if (!subscribers) {
+      subscribers = new Set();
+      channelSubscriptions.set(channel, subscribers);
+    }
+    subscribers.add(ws);
+    return true;
+  }
+
+  function unsubscribeClient(ws) {
+    const subscriptions = clientSubscriptions.get(ws);
+    if (!subscriptions) return;
+
+    subscriptions.jobs.forEach((jobId) => {
       const subscribers = jobSubscriptions.get(jobId);
       if (subscribers) {
         subscribers.delete(ws);
@@ -940,8 +1218,95 @@ function createApiServer(options = {}) {
       }
     });
 
+    subscriptions.channels.forEach((channel) => {
+      const subscribers = channelSubscriptions.get(channel);
+      if (!subscribers) return;
+      subscribers.delete(ws);
+      if (subscribers.size === 0) {
+        channelSubscriptions.delete(channel);
+      }
+    });
+
     clientSubscriptions.delete(ws);
   }
+
+  function sendWsMessage(ws, type, payload) {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({ type, data: payload }));
+  }
+
+  function sendChannelMessage(channel, type, payload) {
+    const subscribers = channelSubscriptions.get(channel);
+    if (!subscribers || subscribers.size === 0) return;
+    subscribers.forEach((ws) => sendWsMessage(ws, type, payload));
+  }
+
+  function getQueuePayload() {
+    return {
+      queue: queueManager.getQueue(),
+      settings: queueManager.getSettings(),
+      updatedAt: Date.now(),
+    };
+  }
+
+  function getQueueSignature(payload) {
+    const queue = Array.isArray(payload.queue) ? payload.queue : [];
+    const settings = payload.settings || {};
+    return [
+      `${settings.maxConcurrent || 1}:${settings.autoStart !== false ? 1 : 0}`,
+      ...queue.map((job) => [
+        job.id,
+        job.queueStatus,
+        job.status,
+        Number(job.progress || 0),
+        Number(job.bytesDownloaded || 0),
+        Number(job.completedSegments || 0),
+      ].join(':')),
+    ].join('|');
+  }
+
+  function broadcastQueueUpdate(payloadOverride = null) {
+    const payload = payloadOverride || getQueuePayload();
+    const signature = getQueueSignature(payload);
+    if (signature === lastQueueSignature) {
+      return false;
+    }
+    lastQueueSignature = signature;
+    sendChannelMessage('queue', 'queue:update', payload);
+    return true;
+  }
+
+  function broadcastCompatibilityUpdate(ws = null) {
+    const compatibility = getCompatibilityInfo();
+    const payload = {
+      appVersion,
+      apiVersion: API.apiVersion,
+      protocolVersion: compatibility.protocolVersion,
+      supportedProtocolVersions: compatibility.supportedProtocolVersions,
+      minExtensionVersion: compatibility.minExtensionVersion,
+      pairingRequired: false,
+      wsPath: '/ws',
+      updatedAt: Date.now(),
+    };
+
+    if (ws) {
+      sendWsMessage(ws, 'compatibility:update', payload);
+      return;
+    }
+    sendChannelMessage('compatibility', 'compatibility:update', payload);
+  }
+
+  function broadcastHistoryUpdate(payload = {}) {
+    sendChannelMessage('history', 'history:update', {
+      changedAt: payload.changedAt || Date.now(),
+      reason: payload.reason || 'refresh',
+      total: Number(payload.total || 0),
+    });
+  }
+
+  notifyHistoryChange = (payload) => {
+    broadcastHistoryUpdate(payload);
+  };
 
   function broadcastJobUpdate(job) {
     if (!job || !job.id) return;
@@ -951,26 +1316,57 @@ function createApiServer(options = {}) {
     const payload = buildJobStatusPayload(job);
     if (!payload) return;
 
-    const message = JSON.stringify({ type: 'job:update', data: payload });
-    subscribers.forEach((ws) => {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(message);
-      }
-    });
+    subscribers.forEach((ws) => sendWsMessage(ws, 'job:update', payload));
   }
 
   wss.on('connection', (ws) => {
     ws.on('message', (raw) => {
       try {
         const message = JSON.parse(raw.toString());
-        if (message && message.type === 'subscribe' && message.jobId) {
-          subscribeClientToJob(ws, String(message.jobId));
+        if (!message || message.type !== 'subscribe') {
+          return;
+        }
 
-          const job = jobs.get(String(message.jobId));
+        // Backward compatibility: { type: 'subscribe', jobId }
+        if (message.jobId && !message.channel) {
+          const jobId = String(message.jobId);
+          subscribeClientToJob(ws, jobId);
+          const job = jobs.get(jobId);
           if (job) {
             lastSentTimestamps.set(job.id, job.updatedAt || Date.now());
             broadcastJobUpdate(job);
           }
+          return;
+        }
+
+        const channel = String(message.channel || '').trim();
+        if (!channel) return;
+
+        if (channel === 'job') {
+          const jobId = String(message.jobId || '').trim();
+          if (!jobId) return;
+          subscribeClientToJob(ws, jobId);
+          const job = jobs.get(jobId);
+          if (job) {
+            lastSentTimestamps.set(job.id, job.updatedAt || Date.now());
+            broadcastJobUpdate(job);
+          }
+          return;
+        }
+
+        const subscribed = subscribeClientToChannel(ws, channel);
+        if (!subscribed) return;
+
+        if (channel === 'queue') {
+          sendWsMessage(ws, 'queue:update', getQueuePayload());
+        } else if (channel === 'history') {
+          sendWsMessage(ws, 'history:update', {
+            changedAt: Date.now(),
+            reason: 'subscribe',
+            total: historyIndex.items.length,
+          });
+        } else if (channel === 'compatibility') {
+          broadcastCompatibilityUpdate(ws);
         }
       } catch (err) {
         logger.warn('Failed to parse WebSocket message', { error: err.message });
@@ -987,6 +1383,13 @@ function createApiServer(options = {}) {
   });
 
   const broadcastInterval = setInterval(() => {
+    const queueChanged = broadcastQueueUpdate();
+    if (queueChanged) {
+      historyIndex.refreshFromDisk().catch((err) => {
+        logger.warn('History index refresh failed after queue update', { error: err && err.message });
+      });
+    }
+
     jobSubscriptions.forEach((subscribers, jobId) => {
       if (!subscribers || subscribers.size === 0) {
         jobSubscriptions.delete(jobId);
@@ -1012,11 +1415,16 @@ function createApiServer(options = {}) {
 
   let started = false;
   let cleanupTimer = null;
+  let historyRefreshTimer = null;
 
-  function start() {
+  async function start() {
     if (started) return Promise.resolve({ host, port });
 
     started = true;
+    await historyIndex.init();
+    lastQueueSignature = '';
+    broadcastQueueUpdate();
+    broadcastCompatibilityUpdate();
 
     cleanupTimer = startCleanupScheduler({
       fsPromises,
@@ -1025,6 +1433,11 @@ function createApiServer(options = {}) {
       tempMaxAgeHours: engineConfig.cleanupAgeHours,
       downloadMaxAgeHours: engineConfig.downloadRetentionHours,
     });
+    historyRefreshTimer = setInterval(() => {
+      historyIndex.refreshFromDisk().catch((err) => {
+        logger.warn('History index refresh failed', { error: err && err.message });
+      });
+    }, 15_000);
 
     return new Promise((resolve) => {
       server.listen(port, host, () => {
@@ -1042,6 +1455,10 @@ function createApiServer(options = {}) {
     if (cleanupTimer) {
       clearInterval(cleanupTimer);
       cleanupTimer = null;
+    }
+    if (historyRefreshTimer) {
+      clearInterval(historyRefreshTimer);
+      historyRefreshTimer = null;
     }
 
     return new Promise((resolve, reject) => {
@@ -1062,6 +1479,9 @@ function createApiServer(options = {}) {
     server,
     start,
     stop,
+    getQueueSettings: () => queueManager.getSettings(),
+    updateQueueSettings: (settings) => queueManager.updateSettings(settings || {}),
+    applyLegacyQueueSettings: (legacy) => queueManager.applyLegacySettingsIfNeeded(legacy || {}),
     getState: () => ({
       queue: queueManager.getQueue(),
       settings: queueManager.getSettings(),

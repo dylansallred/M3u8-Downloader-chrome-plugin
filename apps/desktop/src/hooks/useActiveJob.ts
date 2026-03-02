@@ -3,12 +3,29 @@ import type { QueueData, QueueJob, ActiveMetrics } from '@/types/queue';
 import { createApiClient } from '@/lib/api';
 
 const TERMINAL_STATUSES = new Set(['completed', 'failed', 'cancelled']);
+const SPEED_HOLD_WINDOW_MS = 4_000;
+const ETA_HOLD_WINDOW_MS = 6_000;
+const SPEED_DROP_TO_ZERO_MS = 20_000;
+
+interface ActiveSample {
+  jobId: string;
+  timeMs: number;
+  bytes: number;
+  lastByteChangeAt: number;
+}
+
+interface MetricsState {
+  speedBps: number;
+  etaSeconds: number | null;
+  lastEtaAt: number;
+}
 
 export function useActiveJob(queueData: QueueData, apiBase: string) {
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [activeJob, setActiveJob] = useState<QueueJob | null>(null);
   const [activeMetrics, setActiveMetrics] = useState<ActiveMetrics>({ speedBps: 0, etaSeconds: null });
-  const activeSampleRef = useRef<{ jobId: string; timeMs: number; bytes: number } | null>(null);
+  const activeSampleRef = useRef<ActiveSample | null>(null);
+  const metricsRef = useRef<MetricsState>({ speedBps: 0, etaSeconds: null, lastEtaAt: 0 });
   const activeJobIdRef = useRef<string | null>(null);
 
   const api = useMemo(() => createApiClient(apiBase), [apiBase]);
@@ -120,36 +137,71 @@ export function useActiveJob(queueData: QueueData, apiBase: string) {
     const job = activeJob;
     if (!job || !activeJobId) {
       activeSampleRef.current = null;
+      metricsRef.current = { speedBps: 0, etaSeconds: null, lastEtaAt: 0 };
       setActiveMetrics({ speedBps: 0, etaSeconds: null });
       return;
     }
 
+    const status = String(job.queueStatus || job.status || '');
     const now = Date.now();
     const bytes = Number(job.bytesDownloaded || 0);
     const prev = activeSampleRef.current;
-    let speedBps = activeMetrics.speedBps || 0;
+    let speedBps = Number(metricsRef.current.speedBps || 0);
 
-    if (prev && prev.jobId === activeJobId) {
+    if (prev && prev.jobId === activeJobId && bytes >= prev.bytes) {
       const dt = Math.max(0.001, (now - prev.timeMs) / 1000);
       const db = bytes - prev.bytes;
-      if (db >= 0) {
+      if (db > 0) {
         const instant = db / dt;
-        speedBps = speedBps > 0 ? (speedBps * 0.65) + (instant * 0.35) : instant;
+        speedBps = speedBps > 0 ? (speedBps * 0.72) + (instant * 0.28) : instant;
+        prev.lastByteChangeAt = now;
+      } else if (status === 'downloading') {
+        const idleMs = now - prev.lastByteChangeAt;
+        if (idleMs > SPEED_HOLD_WINDOW_MS) {
+          if (idleMs >= SPEED_DROP_TO_ZERO_MS) {
+            speedBps = 0;
+          } else {
+            // Gradual decay for brief stalls so speed/ETA do not flicker.
+            speedBps *= 0.92;
+          }
+        }
+      } else {
+        speedBps = 0;
       }
     } else {
       speedBps = 0;
     }
 
-    activeSampleRef.current = { jobId: activeJobId, timeMs: now, bytes };
+    if (!Number.isFinite(speedBps) || speedBps < 0) {
+      speedBps = 0;
+    }
+
+    activeSampleRef.current = {
+      jobId: activeJobId,
+      timeMs: now,
+      bytes,
+      lastByteChangeAt: prev && prev.jobId === activeJobId ? prev.lastByteChangeAt : now,
+    };
 
     let etaSeconds: number | null = null;
     const progress = Number(job.progress || 0);
-    if (speedBps > 1 && progress > 0 && progress < 100) {
+    if (status === 'downloading' && speedBps > 1 && progress > 0 && progress < 100) {
       const estimatedTotalBytes = bytes / (progress / 100);
       const remainingBytes = Math.max(0, estimatedTotalBytes - bytes);
       etaSeconds = remainingBytes / speedBps;
+    } else if (
+      status === 'downloading'
+      && metricsRef.current.etaSeconds != null
+      && now - metricsRef.current.lastEtaAt <= ETA_HOLD_WINDOW_MS
+    ) {
+      etaSeconds = metricsRef.current.etaSeconds;
     }
 
+    metricsRef.current = {
+      speedBps,
+      etaSeconds,
+      lastEtaAt: etaSeconds != null ? now : metricsRef.current.lastEtaAt,
+    };
     setActiveMetrics({ speedBps, etaSeconds });
   }, [activeJob, activeJobId]);
 

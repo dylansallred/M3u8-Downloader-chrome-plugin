@@ -17,6 +17,10 @@ async function downloadSegment(segmentUrl, headers, stream, job) {
         return;
       }
       res.on('data', (chunk) => {
+        if (job && job.cancelled) {
+          req.destroy(new Error('Job cancelled'));
+          return;
+        }
         job.bytesDownloaded += chunk.length;
       });
       res.on('end', resolve);

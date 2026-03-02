@@ -268,10 +268,6 @@ async function withExtensionOnly(apiBaseUrl, run) {
   }
 }
 
-async function getPopupAlerts(popupPage) {
-  return popupPage.evaluate(() => window.__e2eAlerts || []);
-}
-
 test('extension popup can send detected media to local API queue', async () => {
   test.skip(process.platform === 'win32', 'Extension automation is validated in CI on Linux runner');
 
@@ -281,11 +277,10 @@ test('extension popup can send detected media to local API queue', async () => {
     await popupPage.click('#refreshButton');
     await expect(popupPage.locator('.media-item').first()).toBeVisible();
 
-    await popupPage.click('button:has-text("Send to Desktop")');
+    await popupPage.click('button:has-text("Send to App")');
     await popupPage.waitForTimeout(600);
 
-    const alerts = await getPopupAlerts(popupPage);
-    expect(alerts.some((a) => a.includes('Queued:'))).toBeTruthy();
+    await expect(popupPage.locator('#toastRegion')).toContainText('Queued:');
 
     const queued = await waitForJobQueued(apiBaseUrl);
     expect(queued).toBeTruthy();
@@ -317,10 +312,8 @@ test('extension blocks enqueue when app requires newer extension version', async
       await expect(popupPage.locator('#connectionStatus')).toContainText('update required');
       await popupPage.click('#refreshButton');
       await expect(popupPage.locator('.media-item').first()).toBeVisible();
-      await popupPage.click('button:has-text("Send to Desktop")');
-      await popupPage.waitForTimeout(500);
-      const alerts = await getPopupAlerts(popupPage);
-      expect(alerts.some((a) => a.includes('Update required before sending jobs'))).toBeTruthy();
+      await popupPage.click('button:has-text("Send to App")');
+      await expect(popupPage.locator('#toastRegion')).toContainText('Update required before sending jobs');
     });
   } finally {
     await compatibilityServer.close();
@@ -342,7 +335,7 @@ test('extension recovers after local desktop API restarts and can enqueue again'
       await popupPage.click('#refreshButton');
       await expect(popupPage.locator('.media-item').first()).toBeVisible();
 
-      await popupPage.click('button:has-text("Send to Desktop")');
+      await popupPage.click('button:has-text("Send to App")');
       await waitForQueueCount(apiBaseUrl, 1, 10_000);
 
       await apiServer.stop();
@@ -354,7 +347,7 @@ test('extension recovers after local desktop API restarts and can enqueue again'
       await popupPage.click('#refreshButton');
       await expect(popupPage.locator('#connectionStatus')).toContainText('Desktop connected');
 
-      await popupPage.click('button:has-text("Send to Desktop")');
+      await popupPage.click('button:has-text("Send to App")');
       await waitForQueueCount(apiBaseUrl, 2, 10_000);
     });
   } finally {

@@ -1,6 +1,77 @@
 const path = require('path');
 const logger = require('../utils/logger');
 
+const CLEANABLE_DOWNLOAD_EXTENSIONS = new Set([
+  '.mp4',
+  '.ts',
+  '.mkv',
+  '.mov',
+  '.webm',
+  '.m4v',
+  '.avi',
+  '.jpg',
+  '.jpeg',
+  '.png',
+  '.srt',
+  '.zip',
+  '.tmp',
+]);
+
+function isCleanupCandidateFile(fileName) {
+  const name = String(fileName || '');
+  if (!name) return false;
+  const ext = path.extname(name).toLowerCase();
+  if (CLEANABLE_DOWNLOAD_EXTENSIONS.has(ext)) return true;
+  if (name.endsWith('.part')) return true;
+  if (/^ts-parts-[a-z0-9]+(?:-[a-z0-9]+)?[.]txt$/i.test(name)) return true;
+  return false;
+}
+
+async function listFilesRecursive(fsPromises, rootDir, currentDir = rootDir, collector = []) {
+  const entries = await fsPromises.readdir(currentDir, { withFileTypes: true });
+  for (const entry of entries) {
+    const fullPath = path.join(currentDir, entry.name);
+    if (entry.isDirectory()) {
+      if (currentDir === rootDir && entry.name.startsWith('temp-')) {
+        continue;
+      }
+      await listFilesRecursive(fsPromises, rootDir, fullPath, collector);
+      continue;
+    }
+    if (entry.isFile()) {
+      collector.push(fullPath);
+    }
+  }
+  return collector;
+}
+
+async function pruneEmptyDirectories(fsPromises, rootDir, currentDir = rootDir) {
+  const entries = await fsPromises.readdir(currentDir, { withFileTypes: true });
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const fullPath = path.join(currentDir, entry.name);
+    if (currentDir === rootDir && entry.name.startsWith('temp-')) {
+      continue;
+    }
+    await pruneEmptyDirectories(fsPromises, rootDir, fullPath);
+  }
+
+  if (currentDir === rootDir) {
+    return;
+  }
+
+  try {
+    const remaining = await fsPromises.readdir(currentDir);
+    if (remaining.length === 0) {
+      await fsPromises.rmdir(currentDir);
+    }
+  } catch (err) {
+    if (err && err.code !== 'ENOENT') {
+      logger.warn('Failed to prune empty directory', { currentDir, error: err.message });
+    }
+  }
+}
+
 async function cleanupOldSegmentFiles({ fsPromises, downloadDir, maxAgeHours }) {
   const CLEANUP_AGE_HOURS = maxAgeHours;
   try {
@@ -9,6 +80,7 @@ async function cleanupOldSegmentFiles({ fsPromises, downloadDir, maxAgeHours }) 
 
     const items = await fsPromises.readdir(downloadDir);
     let deletedCount = 0;
+    let removedTempDirectories = 0;
 
     for (const item of items) {
       if (!item.startsWith('temp-')) continue;
@@ -22,31 +94,17 @@ async function cleanupOldSegmentFiles({ fsPromises, downloadDir, maxAgeHours }) 
       if (ageMs > maxAgeMs) {
         try {
           const files = await fsPromises.readdir(tempDirPath);
-          await Promise.all(
-            files
-              .filter(file => file.endsWith('.ts'))
-              .map(async (file) => {
-                const filePath = path.join(tempDirPath, file);
-                try {
-                  await fsPromises.unlink(filePath);
-                  deletedCount++;
-                } catch (err) {
-                  logger.warn('Failed to delete old segment file', { filePath, error: err.message });
-                }
-              })
-          );
-          const remainingFiles = await fsPromises.readdir(tempDirPath);
-          if (remainingFiles.length === 0) {
-            await fsPromises.rmdir(tempDirPath);
-          }
+          deletedCount += files.length;
+          await fsPromises.rm(tempDirPath, { recursive: true, force: true });
+          removedTempDirectories += 1;
         } catch (err) {
           logger.warn('Failed to cleanup temp directory', { dir: item, error: err.message });
         }
       }
     }
 
-    if (deletedCount > 0) {
-      logger.info('Cleaned up old segment files', { deletedCount });
+    if (deletedCount > 0 || removedTempDirectories > 0) {
+      logger.info('Cleaned up old segment files', { deletedCount, removedTempDirectories });
     }
   } catch (err) {
     logger.error('Error during cleanup', { error: err.message });
@@ -59,14 +117,13 @@ async function cleanupOldCompletedFiles({ fsPromises, downloadDir, maxAgeHours }
   let deletedCount = 0;
 
   try {
-    const items = await fsPromises.readdir(downloadDir);
-    for (const item of items) {
-      // Skip temp directories; handled by segment cleanup above
-      if (item.startsWith('temp-')) continue;
-      // Skip queue state and non-media artifacts
-      if (item === 'queue.json') continue;
+    const files = await listFilesRecursive(fsPromises, downloadDir);
+    for (const itemPath of files) {
+      const relative = path.relative(downloadDir, itemPath).replace(/\\/g, '/');
+      if (!relative || relative.startsWith('..')) continue;
+      if (relative === 'queue.json' || relative === 'history-index.json') continue;
 
-      const itemPath = path.join(downloadDir, item);
+      const fileName = path.basename(itemPath);
       let stats;
       try {
         stats = await fsPromises.stat(itemPath);
@@ -77,8 +134,8 @@ async function cleanupOldCompletedFiles({ fsPromises, downloadDir, maxAgeHours }
 
       if (!stats.isFile()) continue;
 
-      // Consider common download outputs: video files and thumbnails
-      if (!/[.](mp4|ts|mkv|mov|webm|m3u8|jpg|jpeg|png)$/i.test(item)) {
+      // Consider completed media artifacts and stale temporary leftovers.
+      if (!isCleanupCandidateFile(fileName)) {
         continue;
       }
 
@@ -95,6 +152,8 @@ async function cleanupOldCompletedFiles({ fsPromises, downloadDir, maxAgeHours }
     if (deletedCount > 0) {
       logger.info('Cleaned up old completed download files', { deletedCount });
     }
+
+    await pruneEmptyDirectories(fsPromises, downloadDir);
   } catch (err) {
     logger.error('Error during completed file cleanup', { error: err.message });
   }

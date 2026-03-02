@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Dialog, DialogContent } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import { FileVideo, FolderOpen, ExternalLink, Play, Trash2 } from 'lucide-react';
 import type { HistoryItem } from '@/types/history';
 import { resolveThumbnailUrl, extractYear } from '@/lib/utils';
@@ -123,6 +123,10 @@ export function HistoryItemCard({ item, apiBase, onOpenFile, onOpenFolder, onDel
     {thumbnailUrl && (
       <Dialog open={showPreview} onOpenChange={setShowPreview}>
         <DialogContent className="max-w-2xl p-2 bg-background border-border" showCloseButton={false}>
+          <DialogTitle className="sr-only">Preview: {title}</DialogTitle>
+          <DialogDescription className="sr-only">
+            Full-size preview image for {title}.
+          </DialogDescription>
           <img src={thumbnailUrl} alt={title} className="w-full rounded" />
         </DialogContent>
       </Dialog>
