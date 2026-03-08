@@ -71,8 +71,6 @@ function App() {
     return '';
   }, [compatibility.error]);
 
-  const hasUpdate = updater.phase === 'downloaded';
-
   return (
     <AppContext.Provider value={{ apiBase, appInfo }}>
       <div className="h-screen flex flex-col bg-background">
@@ -81,7 +79,7 @@ function App() {
           onViewChange={setCurrentView}
           status={status}
           compatibilityWarning={compatibilityWarning}
-          hasUpdate={hasUpdate}
+          updater={updater}
         />
         <ViewContainer>
           {currentView === 'queue' && (

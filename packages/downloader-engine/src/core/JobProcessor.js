@@ -1307,38 +1307,53 @@ function createJobProcessor({
 
       // Create or reuse temp directory for this playlist's segment files, based on URL
       const jobTempDir = getJobTempDirForUrl(job.url, job.id);
+      const shouldResumePartialSegments = job.resumePartialSegments === true;
+      if (!shouldResumePartialSegments) {
+        try {
+          await fsPromises.rm(jobTempDir, { recursive: true, force: true });
+        } catch (err) {
+          logger.warn('Failed to reset stale HLS temp directory before download', {
+            jobId: job.id,
+            tempDir: jobTempDir,
+            error: err && err.message,
+          });
+        }
+      }
       await fsPromises.mkdir(jobTempDir, { recursive: true });
+      job.resumePartialSegments = false;
 
       // Check for existing segments from previous download attempts
       const existingSegments = new Set();
-      try {
-        const existingFiles = await fsPromises.readdir(jobTempDir);
-        await Promise.all(
-          existingFiles.map(async (file) => {
-            const match = file.match(/^seg-(\d+)\.ts$/);
-            if (!match) return;
-            const segIndex = parseInt(match[1], 10);
-            const filePathSeg = path.join(jobTempDir, file);
-            try {
-              const stats = await fsPromises.stat(filePathSeg);
-              // Only consider files with non-zero size as valid
-              if (stats.size > 0) {
-                existingSegments.add(segIndex);
+      if (shouldResumePartialSegments) {
+        try {
+          const existingFiles = await fsPromises.readdir(jobTempDir);
+          await Promise.all(
+            existingFiles.map(async (file) => {
+              const match = file.match(/^seg-(\d+)\.ts$/);
+              if (!match) return;
+              const segIndex = parseInt(match[1], 10);
+              const filePathSeg = path.join(jobTempDir, file);
+              try {
+                const stats = await fsPromises.stat(filePathSeg);
+                // Only consider files with non-zero size as valid
+                if (stats.size > 0) {
+                  existingSegments.add(segIndex);
+                }
+              } catch (err) {
+                console.warn('Error stat-ing existing segment file', {
+                  jobId: job.id,
+                  filePath: filePathSeg,
+                  message: err && err.message,
+                });
               }
-            } catch (err) {
-              console.warn('Error stat-ing existing segment file', {
-                jobId: job.id,
-                filePath: filePathSeg,
-                message: err && err.message,
-              });
-            }
-          })
-        );
-        if (existingSegments.size > 0) {
-          console.log(`Found ${existingSegments.size} existing segments for job ${job.id}, resuming...`);
+            })
+          );
+          if (existingSegments.size > 0) {
+            console.log(`Found ${existingSegments.size} existing segments for job ${job.id}, resuming...`);
+          }
+        } catch (err) {
+          console.warn('Error checking for existing segments:', err.message);
         }
-      } catch (err) {
-        console.warn('Error checking for existing segments:', err.message);
       }
 
       // Track how many times each segment has been attempted in total.

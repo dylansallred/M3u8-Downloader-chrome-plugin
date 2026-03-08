@@ -89,6 +89,7 @@ class QueueManager {
           queuedJob.pauseRequested = false;
           queuedJob.resumeRequested = false;
           queuedJob.cancelled = false;
+          queuedJob.resumePartialSegments = false;
           queuedJob.speedBps = 0;
           queuedJob.etaSeconds = null;
         }
@@ -667,6 +668,7 @@ class QueueManager {
       job.pauseRequested = true;
       job.resumeRequested = false;
       job.cancelled = true;
+      job.resumePartialSegments = true;
       job.queueStatus = 'paused';
       this.activeJobs.delete(jobId);
       this.saveQueue();
@@ -694,6 +696,7 @@ class QueueManager {
     if (job.queueStatus === 'paused') {
       job.cancelled = false;
       job.pauseRequested = false;
+      job.resumePartialSegments = true;
       job.queueStatus = 'queued';
       job.status = 'pending';
       job.updatedAt = Date.now();
