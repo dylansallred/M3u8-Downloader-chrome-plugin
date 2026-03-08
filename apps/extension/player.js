@@ -3,6 +3,7 @@
   const sourceEl = document.getElementById('source');
   const statusEl = document.getElementById('status');
   const videoEl = document.getElementById('player');
+  const debugLogEl = document.getElementById('debugLog');
   const openSourceBtn = document.getElementById('openSourceBtn');
   const openFallbackBtn = document.getElementById('openFallbackBtn');
   const retryBtn = document.getElementById('retryBtn');
@@ -23,6 +24,8 @@
 
   let hls = null;
   let usingFallback = false;
+  let currentObjectUrl = '';
+  const debugLines = [];
 
   const BLOCKED_HEADER_NAMES = new Set([
     'origin',
@@ -51,6 +54,29 @@
   function setSourceLabel() {
     const src = getCurrentUrl();
     sourceEl.textContent = src || 'No stream URL provided.';
+  }
+
+  function appendDebug(message, data = null) {
+    const line = `[${new Date().toISOString().slice(11, 19)}] ${String(message || '').trim()}`;
+    if (!line.trim()) return;
+    debugLines.push(data ? `${line} ${JSON.stringify(data)}` : line);
+    while (debugLines.length > 40) {
+      debugLines.shift();
+    }
+    if (debugLogEl) {
+      debugLogEl.textContent = debugLines.join('\n');
+      debugLogEl.scrollTop = debugLogEl.scrollHeight;
+    }
+  }
+
+  function revokeCurrentObjectUrl() {
+    if (!currentObjectUrl) return;
+    try {
+      URL.revokeObjectURL(currentObjectUrl);
+    } catch {
+      // ignore
+    }
+    currentObjectUrl = '';
   }
 
   function destroyHls() {
@@ -85,6 +111,41 @@
     return output;
   }
 
+  function resolveReferrerUrl() {
+    const explicitReferrer = String(
+      requestHeaders.Referer
+      || requestHeaders.referer
+      || sourcePageUrl
+      || ''
+    ).trim();
+    if (!explicitReferrer) return '';
+    try {
+      return new URL(explicitReferrer).toString();
+    } catch {
+      return '';
+    }
+  }
+
+  function buildFetchOptions(extra = {}) {
+    const headers = normalizeRequestHeaders(requestHeaders);
+    const referrer = resolveReferrerUrl();
+    const options = {
+      credentials: 'include',
+      cache: 'no-store',
+      redirect: 'follow',
+      ...extra,
+      headers: {
+        ...(extra.headers || {}),
+        ...headers,
+      },
+    };
+    if (referrer) {
+      options.referrer = referrer;
+      options.referrerPolicy = 'strict-origin-when-cross-origin';
+    }
+    return options;
+  }
+
   function applyRequestHeadersToXhr(xhr) {
     const headers = normalizeRequestHeaders(requestHeaders);
     Object.entries(headers).forEach(([key, value]) => {
@@ -106,24 +167,43 @@
 
   function useDirectVideoUrl(url) {
     destroyHls();
+    revokeCurrentObjectUrl();
     videoEl.src = url;
+    videoEl.load();
+    void tryPlay();
+  }
+
+  async function useFetchedMediaUrl(url) {
+    destroyHls();
+    revokeCurrentObjectUrl();
+
+    const response = await fetch(url, buildFetchOptions({ method: 'GET' }));
+    if (!response.ok) {
+      throw new Error(`direct fetch failed with status ${response.status}`);
+    }
+
+    const blob = await response.blob();
+    currentObjectUrl = URL.createObjectURL(blob);
+    videoEl.src = currentObjectUrl;
     videoEl.load();
     void tryPlay();
   }
 
   function fallbackToDirectIfAvailable(reason) {
     if (!fallbackUrl || usingFallback) {
+      appendDebug('No fallback available', { reason });
       setStatus(reason, 'error');
       return false;
     }
     usingFallback = true;
     setSourceLabel();
+    appendDebug('Switching to fallback source', { reason, fallbackUrl });
     setStatus(`HLS unavailable (${reason}). Using fallback source.`, 'warn');
     useDirectVideoUrl(fallbackUrl);
     return true;
   }
 
-  function loadCurrentSource() {
+  async function loadCurrentSource() {
     const url = getCurrentUrl();
     if (!url) {
       setStatus('No source URL available for playback.', 'error');
@@ -131,18 +211,33 @@
     }
 
     setSourceLabel();
+    appendDebug('Loading source', {
+      url,
+      declaredType,
+      usingFallback,
+      hasSourcePageUrl: !!sourcePageUrl,
+      forwardedHeaderKeys: Object.keys(normalizeRequestHeaders(requestHeaders)),
+    });
 
     const hlsCandidate = declaredType === 'hls' || isHlsUrl(url);
     if (!hlsCandidate) {
-      setStatus('Playing direct media source.', 'ok');
-      useDirectVideoUrl(url);
+      setStatus('Loading direct media source.', 'ok');
+      try {
+        await useFetchedMediaUrl(url);
+        appendDebug('Direct media fetched successfully');
+        setStatus('Playing direct media source with captured request context.', 'ok');
+      } catch (err) {
+        appendDebug('Direct fetch failed, falling back to plain video src', {
+          error: err && err.message ? err.message : String(err || 'Unknown error'),
+        });
+        setStatus('Direct fetch failed, retrying without captured request context.', 'warn');
+        useDirectVideoUrl(url);
+      }
       return;
     }
 
     if (videoEl.canPlayType('application/vnd.apple.mpegurl')) {
-      setStatus('Using native HLS playback.', 'ok');
-      useDirectVideoUrl(url);
-      return;
+      appendDebug('Native HLS support detected, but forcing HLS.js to preserve request context');
     }
 
     if (typeof window.Hls === 'undefined' || !window.Hls || !window.Hls.isSupported()) {
@@ -162,21 +257,46 @@
         xhr.withCredentials = true;
         applyRequestHeadersToXhr(xhr);
       },
+      fetchSetup: (context, initParams) => {
+        const request = new Request(context.url, buildFetchOptions(initParams || {}));
+        appendDebug('Configured HLS fetch request', {
+          url: context.url,
+          hasReferrer: !!resolveReferrerUrl(),
+          headerKeys: Object.keys(normalizeRequestHeaders(requestHeaders)),
+        });
+        return request;
+      },
     });
 
     hls.on(window.Hls.Events.MEDIA_ATTACHED, () => {
+      appendDebug('HLS media attached', { url });
       hls.loadSource(url);
     });
 
     hls.on(window.Hls.Events.MANIFEST_PARSED, () => {
+      appendDebug('HLS manifest parsed successfully');
       setStatus('Streaming HLS manifest.', 'ok');
       void tryPlay();
     });
 
+    hls.on(window.Hls.Events.LEVEL_LOADED, (_event, data) => {
+      appendDebug('HLS level loaded', {
+        level: data && data.level,
+        url: data && data.details && data.details.url,
+      });
+    });
+
     hls.on(window.Hls.Events.ERROR, (_event, data) => {
-      if (!data || !data.fatal) return;
       const reason = data.details || data.type || 'unknown HLS error';
       const responseCode = Number(data.response && data.response.code || 0);
+      appendDebug('HLS error', {
+        fatal: !!(data && data.fatal),
+        type: data && data.type,
+        details: data && data.details,
+        responseCode,
+        url: data && data.context && data.context.url,
+      });
+      if (!data || !data.fatal) return;
       if (fallbackToDirectIfAvailable(reason)) return;
       if (responseCode === 403) {
         setStatus('HLS playback blocked (403). This source likely requires page-bound referrer/origin/cookies.', 'error');
@@ -227,6 +347,13 @@
 
   async function init() {
     await initializeFromSessionIfAvailable();
+    appendDebug('Stream session initialized', {
+      hasPrimaryUrl: !!primaryUrl,
+      hasFallbackUrl: !!fallbackUrl,
+      declaredType,
+      sourcePageUrl: sourcePageUrl || null,
+      forwardedHeaderKeys: Object.keys(normalizeRequestHeaders(requestHeaders)),
+    });
 
     titleEl.textContent = displayTitle || 'Stream Player';
     document.title = `${displayTitle || 'Stream Player'} - Stream Player`;
@@ -243,10 +370,12 @@
 
     retryBtn?.addEventListener('click', () => {
       usingFallback = false;
+      appendDebug('Retry requested');
       loadCurrentSource();
     });
 
     videoEl.addEventListener('error', () => {
+      appendDebug('Video element emitted error');
       const switched = fallbackToDirectIfAvailable('video element error');
       if (!switched) {
         setStatus('Video element failed to load this source.', 'error');
@@ -261,5 +390,6 @@
 
   window.addEventListener('beforeunload', () => {
     destroyHls();
+    revokeCurrentObjectUrl();
   });
 })();

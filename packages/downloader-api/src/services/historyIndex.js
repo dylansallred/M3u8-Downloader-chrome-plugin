@@ -295,6 +295,39 @@ class HistoryIndexService {
     return files;
   }
 
+  collectPersistedExternalMediaFiles() {
+    const files = [];
+    const seen = new Set();
+
+    for (const item of this.items) {
+      if (!item || typeof item.absolutePath !== 'string' || !item.absolutePath.trim()) continue;
+      const absolutePath = item.absolutePath.trim();
+      const relative = this.toRelativePath(absolutePath);
+      if (relative) continue;
+      if (seen.has(absolutePath)) continue;
+      if (!fs.existsSync(absolutePath)) continue;
+
+      try {
+        const stat = fs.statSync(absolutePath);
+        if (!stat.isFile()) continue;
+        files.push({
+          fullPath: absolutePath,
+          absolutePath,
+          relativePath: path.basename(absolutePath),
+          fileName: path.basename(absolutePath),
+          dirRelative: '',
+          stat,
+          persistedItem: item,
+        });
+        seen.add(absolutePath);
+      } catch {
+        continue;
+      }
+    }
+
+    return files;
+  }
+
   findThumbnailUrl({ validJobId, dirAbsolute, dirRelative, job }) {
     const localThumbCandidates = [];
     if (validJobId) {
@@ -356,6 +389,7 @@ class HistoryIndexService {
     const validJobId = extractedJobId && isValidHistoryJobId(extractedJobId)
       ? extractedJobId
       : null;
+    const persistedItem = mediaFile.persistedItem || null;
     const job = mediaFile.job
       || jobLookup.get(relativePath)
       || (validJobId ? this.jobs.get(validJobId) : null)
@@ -386,14 +420,14 @@ class HistoryIndexService {
       absolutePath: mediaFile.absolutePath || mediaFile.fullPath,
       label: deriveLabel(fileName),
       jobId: resolvedJobId,
-      title: (job && job.title) || null,
+      title: (job && job.title) || (persistedItem && persistedItem.title) || null,
       sizeBytes: Number(mediaFile.stat.size || 0),
       modifiedAt: Number(mediaFile.stat.mtimeMs || Date.now()),
       ext,
       thumbnailUrl,
-      tmdbReleaseDate: (job && job.tmdbReleaseDate) || null,
-      tmdbMetadata: (job && job.tmdbMetadata) || null,
-      youtubeMetadata: (job && job.youtubeMetadata) || null,
+      tmdbReleaseDate: (job && job.tmdbReleaseDate) || (persistedItem && persistedItem.tmdbReleaseDate) || null,
+      tmdbMetadata: (job && job.tmdbMetadata) || (persistedItem && persistedItem.tmdbMetadata) || null,
+      youtubeMetadata: (job && job.youtubeMetadata) || (persistedItem && persistedItem.youtubeMetadata) || null,
     };
   }
 
@@ -419,6 +453,7 @@ class HistoryIndexService {
 
       const mediaFiles = await this.walkMediaFiles();
       mediaFiles.push(...this.collectExternalJobMediaFiles());
+      mediaFiles.push(...this.collectPersistedExternalMediaFiles());
       const filesByDir = new Map();
       for (const mediaFile of mediaFiles) {
         const key = mediaFile.dirRelative || '';

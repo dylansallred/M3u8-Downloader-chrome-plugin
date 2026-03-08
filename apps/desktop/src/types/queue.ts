@@ -58,6 +58,7 @@ export interface QueueJob {
   tmdbTitle?: string;
   tmdbReleaseDate?: string;
   tmdbMetadata?: TmdbMetadata | null;
+  manualTitleOverride?: boolean;
   youtubeMetadata?: YoutubeMetadata | null;
   segmentStates?: Record<string, SegmentState>;
   threadStates?: ThreadState[];

@@ -1,6 +1,7 @@
 const path = require('path');
 const fs = require('fs');
 const logger = require('../utils/logger');
+const { buildPlexBaseName } = require('../utils/plexNaming');
 
 class QueueManager {
   constructor(options) {
@@ -213,7 +214,7 @@ class QueueManager {
     if (!targetDir) return;
 
     const ext = path.extname(primaryPath) || (job.mp4Path ? '.mp4' : '');
-    const preferredBaseName = this.sanitizeFinalFileName(job.title || job.downloadNameMp4 || job.downloadName || 'Download', ext);
+    const preferredBaseName = this.sanitizeFinalFileName(buildPlexBaseName(job), ext);
 
     try {
       fs.mkdirSync(targetDir, { recursive: true });
@@ -347,6 +348,8 @@ class QueueManager {
           tmdbTitle: job.tmdbTitle,
           tmdbReleaseDate: job.tmdbReleaseDate,
           tmdbMetadata: job.tmdbMetadata || null,
+          mediaHints: job.mediaHints || null,
+          manualTitleOverride: !!job.manualTitleOverride,
           skipThumbnailGeneration: job.skipThumbnailGeneration,
           subtitlePath: job.subtitlePath,
           subtitleZipPath: job.subtitleZipPath,
@@ -425,6 +428,8 @@ class QueueManager {
       tmdbTitle: job.tmdbTitle,
       tmdbReleaseDate: job.tmdbReleaseDate,
       tmdbMetadata: job.tmdbMetadata || null,
+      mediaHints: job.mediaHints || null,
+      manualTitleOverride: !!job.manualTitleOverride,
       youtubeMetadata: job.youtubeMetadata || null,
     }));
   }
@@ -547,9 +552,11 @@ class QueueManager {
   renameJob(jobId, newTitle) {
     const job = this.queue.find((j) => j.id === jobId);
     if (!job) return false;
+    if (job.queueStatus !== 'queued' && job.queueStatus !== 'paused') return false;
 
     job.title = newTitle;
     job.downloadName = newTitle;
+    job.manualTitleOverride = true;
     
     // Ensure downloadNameMp4 has .mp4 extension
     let mp4Name = newTitle;

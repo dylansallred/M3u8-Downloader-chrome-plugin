@@ -25,6 +25,7 @@ let extensionInfo = null;
 let compatibilityIssue = null;
 const pendingSendKeys = new Set();
 const pendingStreamKeys = new Set();
+const customTitleOverrides = new Map();
 
 function showToast(message, variant = 'info', timeoutMs = 2600) {
   const text = String(message || '').trim();
@@ -78,6 +79,25 @@ function showToast(message, variant = 'info', timeoutMs = 2600) {
 function getSendKey(item) {
   if (item && item.id) return String(item.id);
   return String(item && item.url || '');
+}
+
+function normalizeCustomTitleOverride(value) {
+  return String(value || '').replace(/\s+/g, ' ').trim();
+}
+
+function getCustomTitleOverride(item) {
+  return customTitleOverrides.get(getSendKey(item)) || '';
+}
+
+function setCustomTitleOverride(item, value) {
+  const sendKey = getSendKey(item);
+  const normalized = normalizeCustomTitleOverride(value);
+  if (!normalized) {
+    customTitleOverrides.delete(sendKey);
+    return '';
+  }
+  customTitleOverrides.set(sendKey, normalized);
+  return normalized;
 }
 
 function setQueueButtonBusy(button, isBusy) {
@@ -304,14 +324,20 @@ async function removeTabMediaItem(tabId, itemId) {
   return response && response.ok;
 }
 
-function buildJobPayload(item) {
+function buildJobPayload(item, titleOverride = '') {
   const mediaUrl = item.url;
   const pageTitle = String(item.sourcePageTitle || (activeTab && activeTab.title) || '').trim();
   const sourcePageUrl = String(item.sourcePageUrl || (activeTab && activeTab.url) || '').trim();
-  const displayTitle = getDisplayTitle(item);
+  const overrideTitle = normalizeCustomTitleOverride(titleOverride);
+  const displayTitle = overrideTitle || getDisplayTitle(item);
   const titleHints = pickJobTitleHints(inferTitleHints(item, pageTitle, displayTitle));
+  if (overrideTitle) {
+    titleHints.lookupTitle = overrideTitle;
+  }
   const baseTitle = displayTitle || pageTitle || item.filename || 'Download';
-  const title = appendEpisodeTagToTitle(baseTitle, titleHints);
+  const title = overrideTitle
+    ? overrideTitle
+    : appendEpisodeTagToTitle(baseTitle, titleHints);
   const youtubeMetadata = item && item.youtubeMetadata && typeof item.youtubeMetadata === 'object'
     ? item.youtubeMetadata
     : null;
@@ -321,7 +347,7 @@ function buildJobPayload(item) {
     mediaUrl,
     mediaType: item.type || (/\.m3u8(\?|$)/i.test(mediaUrl) ? 'hls' : 'file'),
     title,
-    resourceName: item.filename || title,
+    resourceName: overrideTitle || item.filename || title,
     headers: item.requestHeaders || {},
     sourcePageUrl,
     sourcePageTitle: pageTitle || title,
@@ -353,6 +379,7 @@ async function sendJob(item, queueButton = null) {
   setQueueButtonBusy(queueButton, true);
 
   try {
+    const titleOverride = getCustomTitleOverride(item);
     const res = await fetch(`${API_BASE}/v1/jobs`, {
       method: 'POST',
       headers: {
@@ -361,7 +388,7 @@ async function sendJob(item, queueButton = null) {
         'X-Protocol-Version': String(EXTENSION_PROTOCOL_VERSION),
         'X-Extension-Version': String(extensionInfo?.version || ''),
       },
-      body: JSON.stringify(buildJobPayload(item)),
+      body: JSON.stringify(buildJobPayload(item, titleOverride)),
     });
 
     const data = await res.json().catch(() => ({}));
@@ -1256,9 +1283,15 @@ function renderMedia(items) {
 
   for (const item of items) {
     const pageTitle = String(item.sourcePageTitle || (activeTab && activeTab.title) || '').trim();
-    const displayTitle = getDisplayTitle(item);
+    const customTitle = getCustomTitleOverride(item);
+    const displayTitle = customTitle || getDisplayTitle(item);
     const titleHints = inferTitleHints(item, pageTitle, displayTitle);
     const displayTitleWithEpisode = appendDisplayEpisodeTagToTitle(displayTitle, titleHints);
+    const visibleTitle = customTitle ? displayTitle : displayTitleWithEpisode;
+    const defaultDisplayTitle = getDisplayTitle(item);
+    const defaultTitleHints = inferTitleHints(item, pageTitle, defaultDisplayTitle);
+    const defaultDisplayTitleWithEpisode = appendDisplayEpisodeTagToTitle(defaultDisplayTitle, defaultTitleHints);
+    let isEditingTitle = false;
 
     const wrapper = document.createElement('div');
     wrapper.className = 'media-item glass-subtle glass-glow p-3 animate-slide-up';
@@ -1267,9 +1300,54 @@ function renderMedia(items) {
     const titleRow = document.createElement('div');
     titleRow.className = 'flex items-start justify-between gap-2';
 
+    const titleWrap = document.createElement('div');
+    titleWrap.className = 'title-wrap';
+
     const title = document.createElement('h3');
     title.className = 'text-[0.8125rem] font-medium text-fg truncate flex-1';
-    title.textContent = displayTitleWithEpisode;
+    title.textContent = visibleTitle;
+
+    const titleEditControls = document.createElement('div');
+    titleEditControls.className = 'title-edit-controls';
+
+    const titleInput = document.createElement('input');
+    titleInput.className = 'input title-inline-input';
+    titleInput.type = 'text';
+    titleInput.value = customTitle || displayTitleWithEpisode;
+    titleInput.placeholder = 'Rename before sending to app';
+    titleInput.setAttribute('aria-label', 'Rename before sending to app');
+    titleInput.style.display = 'none';
+
+    const editBtn = document.createElement('button');
+    editBtn.className = 'btn-icon-subtle';
+    editBtn.type = 'button';
+    editBtn.title = 'Edit title';
+    editBtn.setAttribute('aria-label', 'Edit title');
+    editBtn.innerHTML = '<svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 113 3L7 19l-4 1 1-4 12.5-12.5z"/></svg>';
+
+    const saveBtn = document.createElement('button');
+    saveBtn.className = 'btn-icon-subtle';
+    saveBtn.type = 'button';
+    saveBtn.title = 'Save title';
+    saveBtn.setAttribute('aria-label', 'Save title');
+    saveBtn.innerHTML = '<svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>';
+    saveBtn.style.display = 'none';
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'btn-icon-subtle';
+    cancelBtn.type = 'button';
+    cancelBtn.title = 'Cancel editing';
+    cancelBtn.setAttribute('aria-label', 'Cancel editing');
+    cancelBtn.innerHTML = '<svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18"/><path d="M6 6l12 12"/></svg>';
+    cancelBtn.style.display = 'none';
+
+    const resetBtn = document.createElement('button');
+    resetBtn.className = 'btn-icon-subtle';
+    resetBtn.type = 'button';
+    resetBtn.title = 'Reset title';
+    resetBtn.setAttribute('aria-label', 'Reset title');
+    resetBtn.innerHTML = '<svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M3 10V4h6"/><path d="M3.5 15a8.5 8.5 0 101.8-9.2L3 8"/></svg>';
+    resetBtn.style.display = customTitle ? '' : 'none';
 
     const pillGroup = document.createElement('div');
     pillGroup.className = 'flex items-center gap-1 flex-shrink-0';
@@ -1290,15 +1368,14 @@ function renderMedia(items) {
       : (item.type || 'file').toUpperCase();
     pillGroup.appendChild(typePill);
 
-    const episodeTag = formatEpisodeTag(titleHints.seasonNumber, titleHints.episodeNumber);
-    if (!isYoutubePageDetection && (episodeTag || titleHints.isTvCandidate)) {
-      const tvPill = document.createElement('span');
-      tvPill.className = 'pill pill-muted';
-      tvPill.textContent = episodeTag || 'TV';
-      pillGroup.appendChild(tvPill);
-    }
-
-    titleRow.appendChild(title);
+    titleEditControls.appendChild(editBtn);
+    titleEditControls.appendChild(saveBtn);
+    titleEditControls.appendChild(cancelBtn);
+    titleEditControls.appendChild(resetBtn);
+    titleWrap.appendChild(title);
+    titleWrap.appendChild(titleInput);
+    titleRow.appendChild(titleWrap);
+    titleRow.appendChild(titleEditControls);
     titleRow.appendChild(pillGroup);
 
     // Row 2: domain + content type
@@ -1405,6 +1482,83 @@ function renderMedia(items) {
     // Row 5: Action buttons
     const actionRow = document.createElement('div');
     actionRow.className = 'flex items-center justify-between mt-2.5 gap-2';
+
+    const updateTitlePreview = () => {
+      const override = normalizeCustomTitleOverride(titleInput.value);
+      const nextDisplayTitle = override || getDisplayTitle(item);
+      const nextTitleHints = inferTitleHints(item, pageTitle, nextDisplayTitle);
+      const nextDisplayTitleWithEpisode = appendDisplayEpisodeTagToTitle(nextDisplayTitle, nextTitleHints);
+      title.textContent = override ? nextDisplayTitle : nextDisplayTitleWithEpisode;
+      detailsSummary.textContent = `Guess: ${formatMediaGuess(nextTitleHints)}${nextTitleHints.lookupTitle ? ` · Lookup: ${nextTitleHints.lookupTitle}` : ''}`;
+
+      const nextDebugPayload = buildDebugPayload(
+        item,
+        pageTitle,
+        nextDisplayTitle,
+        nextTitleHints,
+        resolution,
+        friendlyType,
+      );
+      detailsJson.textContent = JSON.stringify(nextDebugPayload, null, 2);
+      resetBtn.style.display = override ? '' : 'none';
+    };
+
+    function setEditingTitle(nextEditing) {
+      isEditingTitle = !!nextEditing;
+      title.style.display = isEditingTitle ? 'none' : '';
+      titleInput.style.display = isEditingTitle ? '' : 'none';
+      editBtn.style.display = isEditingTitle ? 'none' : '';
+      saveBtn.style.display = isEditingTitle ? '' : 'none';
+      cancelBtn.style.display = isEditingTitle ? '' : 'none';
+      resetBtn.style.display = !isEditingTitle && getCustomTitleOverride(item) ? '' : 'none';
+      if (isEditingTitle) {
+        titleInput.value = getCustomTitleOverride(item) || defaultDisplayTitleWithEpisode;
+        setTimeout(() => {
+          titleInput.focus();
+          titleInput.select();
+        }, 0);
+      }
+    }
+
+    function applyEditedTitle() {
+      const typedValue = normalizeCustomTitleOverride(titleInput.value);
+      const defaultTitle = normalizeCustomTitleOverride(defaultDisplayTitleWithEpisode);
+      const valueToStore = typedValue === defaultTitle ? '' : typedValue;
+      setCustomTitleOverride(item, valueToStore);
+      updateTitlePreview();
+      setEditingTitle(false);
+    }
+
+    editBtn.addEventListener('click', () => {
+      setEditingTitle(true);
+    });
+
+    saveBtn.addEventListener('click', () => {
+      applyEditedTitle();
+    });
+
+    cancelBtn.addEventListener('click', () => {
+      titleInput.value = getCustomTitleOverride(item) || defaultDisplayTitleWithEpisode;
+      setEditingTitle(false);
+    });
+
+    titleInput.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        applyEditedTitle();
+      } else if (event.key === 'Escape') {
+        event.preventDefault();
+        titleInput.value = getCustomTitleOverride(item) || defaultDisplayTitleWithEpisode;
+        setEditingTitle(false);
+      }
+    });
+
+    resetBtn.addEventListener('click', () => {
+      customTitleOverrides.delete(getSendKey(item));
+      titleInput.value = defaultDisplayTitleWithEpisode;
+      updateTitlePreview();
+      setEditingTitle(false);
+    });
 
     const detailsBtn = document.createElement('button');
     detailsBtn.className = 'btn btn-subtle text-xs px-2 py-1';

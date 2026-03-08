@@ -243,13 +243,14 @@ async function waitForJobQueueState(baseUrl, jobId, expectedStates, opts = {}) {
   }, opts);
 }
 
-async function startApi({ dataDir, port }) {
+async function startApi({ dataDir, port, ...options }) {
   const server = createApiServer({
     dataDir,
     port,
     host: '127.0.0.1',
     appVersion: 'test-version',
     downloadDir: path.join(dataDir, 'downloads'),
+    ...options,
   });
   await server.start();
   return server;
@@ -291,6 +292,51 @@ test('media metadata inference detects common TV episode patterns', () => {
   });
   assert.equal(tvRouteHint.isTvCandidate, true);
   assert.equal(tvRouteHint.lookupTitle, 'Scrubs');
+});
+
+test('queued jobs can be renamed before download', async () => {
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'm3u8-tests-rename-'));
+  const port = await getFreePort();
+  const baseUrl = `http://127.0.0.1:${port}`;
+
+  const mediaServer = await startFixtureMediaServer();
+  const apiServer = await startApi({ dataDir: tmpRoot, port });
+
+  try {
+    const queueSettingsRes = await apiFetch(baseUrl, '/api/queue/settings', {
+      method: 'POST',
+      includeV1Headers: false,
+      body: { maxConcurrent: 1, autoStart: false },
+    });
+    assert.equal(queueSettingsRes.status, 200);
+
+    const createRes = await apiFetch(baseUrl, '/v1/jobs', {
+      method: 'POST',
+      body: {
+        mediaUrl: `${mediaServer.baseUrl}/sample.mp4`,
+        mediaType: 'file',
+        title: 'Wrong Title',
+      },
+    });
+    assert.equal(createRes.status, 200);
+
+    const jobId = createRes.data.jobId;
+    const renameRes = await apiFetch(baseUrl, `/api/queue/${jobId}/rename`, {
+      method: 'POST',
+      includeV1Headers: false,
+      body: { title: 'Correct Title (2024)' },
+    });
+    assert.equal(renameRes.status, 200);
+
+    const queueRes = await apiFetch(baseUrl, '/api/queue', { includeV1Headers: false });
+    const job = queueRes.data.queue.find((entry) => entry.id === jobId);
+    assert.ok(job);
+    assert.equal(job.title, 'Correct Title (2024)');
+    assert.equal(job.manualTitleOverride, true);
+  } finally {
+    await apiServer.stop();
+    await mediaServer.close();
+  }
 });
 
 test('v1 health, validation, queue lifecycle, and restart recovery', async () => {
@@ -737,6 +783,71 @@ test('completed downloads are stored under a per-job folder', async () => {
     assert.ok(persisted);
     assert.equal(path.dirname(persisted.filePath), path.join(downloadDir, jobId));
     assert.equal(fs.existsSync(persisted.filePath), true);
+  } finally {
+    await apiServer.stop();
+    await mediaServer.close();
+  }
+});
+
+test('removing a completed queue item does not remove external history entries', async () => {
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'm3u8-tests-external-history-retention-'));
+  const port = await getFreePort();
+  const baseUrl = `http://127.0.0.1:${port}`;
+  const externalCompletedDir = path.join(tmpRoot, 'plex-output');
+
+  const mediaServer = await startFixtureMediaServer();
+  const apiServer = await startApi({
+    dataDir: tmpRoot,
+    port,
+    getCompletedOutputDir: () => externalCompletedDir,
+  });
+
+  try {
+    const createRes = await apiFetch(baseUrl, '/v1/jobs', {
+      method: 'POST',
+      body: {
+        mediaUrl: `${mediaServer.baseUrl}/sample.mp4`,
+        mediaType: 'file',
+        title: 'External History Retention Job',
+      },
+    });
+    assert.equal(createRes.status, 200);
+    const jobId = createRes.data.jobId;
+
+    const completedJob = await waitFor(async () => {
+      const queueRes = await apiFetch(baseUrl, '/api/queue', { includeV1Headers: false });
+      const job = queueRes.data.queue.find((entry) => entry.id === jobId);
+      return job && job.queueStatus === 'completed' ? job : false;
+    }, { timeoutMs: 12_000, intervalMs: 200 });
+
+    const historyBeforeDelete = await apiFetch(baseUrl, '/api/history', { includeV1Headers: false });
+    assert.equal(historyBeforeDelete.status, 200);
+    const historyItemBeforeDelete = historyBeforeDelete.data.items.find((entry) => entry.jobId === jobId);
+    assert.ok(historyItemBeforeDelete);
+    assert.equal(fs.existsSync(historyItemBeforeDelete.absolutePath), true);
+    assert.equal(path.dirname(historyItemBeforeDelete.absolutePath), externalCompletedDir);
+
+    const deleteRes = await apiFetch(baseUrl, `/api/queue/${jobId}`, {
+      method: 'DELETE',
+      includeV1Headers: false,
+    });
+    assert.equal(deleteRes.status, 200);
+
+    const historyAfterDelete = await waitFor(async () => {
+      const historyRes = await apiFetch(baseUrl, '/api/history', { includeV1Headers: false });
+      const item = historyRes.data.items.find((entry) => entry.absolutePath === historyItemBeforeDelete.absolutePath);
+      return item ? historyRes : false;
+    }, { timeoutMs: 5_000, intervalMs: 200 });
+
+    assert.equal(historyAfterDelete.status, 200);
+    assert.equal(
+      historyAfterDelete.data.items.some((entry) => entry.absolutePath === historyItemBeforeDelete.absolutePath),
+      true,
+    );
+
+    const queueAfterDelete = await apiFetch(baseUrl, '/api/queue', { includeV1Headers: false });
+    assert.equal(queueAfterDelete.status, 200);
+    assert.equal(queueAfterDelete.data.queue.some((entry) => entry.id === completedJob.id), false);
   } finally {
     await apiServer.stop();
     await mediaServer.close();

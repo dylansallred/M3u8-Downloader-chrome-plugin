@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
 const logger = require('../utils/logger');
+const { buildFfmpegMetadataArgs } = require('../utils/mediaTags');
 
 async function remuxAndGenerateThumbnails(job, filePathFinal, {
   downloadDir,
@@ -80,6 +81,7 @@ async function remuxAndGenerateThumbnails(job, filePathFinal, {
       let concatListPath = concatListPathRef || null;
 
       if (useConcatDemuxer) {
+        const metadataArgs = buildFfmpegMetadataArgs(job);
         try {
           concatListPath = concatListPath || path.join(outputDir, `ts-parts-${job.id}.txt`);
           const listLines = job.tsParts.map(p => `file '${p.replace(/'/g, "'\\''")}'`).join('\n');
@@ -105,9 +107,11 @@ async function remuxAndGenerateThumbnails(job, filePathFinal, {
           '-c:v', 'copy',
           '-c:a', 'copy',
           ...(withSubs ? ['-c:s', 'mov_text'] : []),
+          ...metadataArgs,
           mp4Path,
         ];
       } else {
+        const metadataArgs = buildFfmpegMetadataArgs(job);
         args = [
           '-y',
           '-fflags', '+discardcorrupt',
@@ -118,6 +122,7 @@ async function remuxAndGenerateThumbnails(job, filePathFinal, {
           '-c:v', 'copy',
           '-c:a', 'copy',
           ...(withSubs ? ['-c:s', 'mov_text'] : []),
+          ...metadataArgs,
           mp4Path,
         ];
       }

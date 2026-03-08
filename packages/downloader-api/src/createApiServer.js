@@ -1360,7 +1360,49 @@ function createApiServer(options = {}) {
   });
 
   registerHistoryRoutes(app, historyIndex, fsPromises, resolvedDownloadDir);
-  registerQueueRoutes(app, queueManager);
+  registerQueueRoutes(app, queueManager, {
+    onRenameJob: async (jobId, title) => {
+      const job = jobs.get(jobId);
+      if (!job) return;
+
+      const inferredHints = inferMediaMetadata({
+        title,
+        resourceName: job.downloadName,
+        sourcePageTitle: title,
+        mediaUrl: job.url,
+        sourcePageUrl: job.sourcePageUrl,
+      });
+      const previousHints = job.mediaHints && typeof job.mediaHints === 'object'
+        ? job.mediaHints
+        : {};
+      const seasonNumber = Number.isFinite(inferredHints.seasonNumber)
+        ? inferredHints.seasonNumber
+        : (Number.isFinite(previousHints.seasonNumber) ? previousHints.seasonNumber : null);
+      const episodeNumber = Number.isFinite(inferredHints.episodeNumber)
+        ? inferredHints.episodeNumber
+        : (Number.isFinite(previousHints.episodeNumber) ? previousHints.episodeNumber : null);
+
+      job.mediaHints = {
+        ...previousHints,
+        ...inferredHints,
+        lookupTitle: String(inferredHints.lookupTitle || title || '').trim(),
+        seasonNumber,
+        episodeNumber,
+        isTvCandidate: Boolean(
+          inferredHints.isTvCandidate
+          || previousHints.isTvCandidate
+          || (Number.isFinite(seasonNumber) && Number.isFinite(episodeNumber))
+        ),
+      };
+      job.updatedAt = Date.now();
+
+      if (appConfig.tmdbApiKey) {
+        await enrichTmdb(job);
+      } else {
+        queueManager.saveQueue();
+      }
+    },
+  });
   registerJobRoutes(
     app,
     jobs,

@@ -6,7 +6,8 @@ const {
   renameTitleValidation
 } = require('../utils/validators');
 
-function registerQueueRoutes(app, queueManager) {
+function registerQueueRoutes(app, queueManager, options = {}) {
+  const onRenameJob = typeof options.onRenameJob === 'function' ? options.onRenameJob : null;
   // GET /api/queue - Get all jobs in queue
   app.get('/api/queue', (req, res) => {
     try {
@@ -20,17 +21,28 @@ function registerQueueRoutes(app, queueManager) {
   });
 
   // POST /api/queue/:id/rename - Update job title/download name
-  app.post('/api/queue/:id/rename', [...jobIdValidation, ...renameTitleValidation], (req, res) => {
+  app.post('/api/queue/:id/rename', [...jobIdValidation, ...renameTitleValidation], async (req, res) => {
     const jobId = req.params.id;
     const { title } = req.body || {};
 
     const success = queueManager.renameJob(jobId, title.trim());
 
     if (success) {
+      if (onRenameJob) {
+        try {
+          await onRenameJob(jobId, title.trim());
+        } catch (err) {
+          logger.warn('Queue job rename follow-up failed', {
+            jobId,
+            title: title.trim(),
+            error: err && err.message,
+          });
+        }
+      }
       logger.info('Queue job renamed', { jobId, title: title.trim() });
       res.json({ ok: true, title: title.trim() });
     } else {
-      res.status(404).json({ error: 'Job not found or cannot rename' });
+      res.status(400).json({ error: 'Job not found or cannot rename in its current state' });
     }
   });
 

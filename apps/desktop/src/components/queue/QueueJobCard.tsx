@@ -4,7 +4,8 @@ import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
-import { Play, Pause, RotateCcw, Trash2, RefreshCw } from 'lucide-react';
+import { Input } from '@/components/ui/input';
+import { Play, Pause, RotateCcw, Trash2, RefreshCw, Pencil } from 'lucide-react';
 import type { QueueJob } from '@/types/queue';
 import { cn, getQueueStatusLabel, getQueuePrimaryAction, resolveJobStatus, resolveThumbnailUrl, extractYear } from '@/lib/utils';
 
@@ -38,15 +39,35 @@ interface QueueJobCardProps {
 
 export function QueueJobCard({ job, apiBase, onAction }: QueueJobCardProps) {
   const [showPreview, setShowPreview] = useState(false);
+  const [showRename, setShowRename] = useState(false);
+  const [renameTitle, setRenameTitle] = useState(job.title || '');
+  const [isRenaming, setIsRenaming] = useState(false);
   const primaryAction = getQueuePrimaryAction(job);
   const progress = Math.max(0, Math.min(100, Number(job.progress || 0)));
   const jobStatus = resolveJobStatus(job);
+  const canRename = job.queueStatus === 'queued' || job.queueStatus === 'paused';
   const showRetryOriginalHls = job.fallbackUsed && job.originalHlsUrl && ['failed', 'cancelled'].includes(jobStatus);
   const thumbnailUrl = resolveThumbnailUrl(job.thumbnailUrls?.[0], apiBase);
   const year = extractYear(job.tmdbReleaseDate);
   const genres = job.tmdbMetadata?.genres?.slice(0, 2) ?? [];
   const channelName = String(job.youtubeMetadata?.channelName || '').trim();
   const hasMetaLine = year || genres.length > 0;
+
+  async function handleRenameSave() {
+    const nextTitle = String(renameTitle || '').trim();
+    if (!nextTitle || nextTitle === job.title) {
+      setShowRename(false);
+      setRenameTitle(job.title || '');
+      return;
+    }
+    setIsRenaming(true);
+    try {
+      await onAction(`/api/queue/${job.id}/rename`, 'POST', { title: nextTitle });
+      setShowRename(false);
+    } finally {
+      setIsRenaming(false);
+    }
+  }
 
   return (
     <>
@@ -74,6 +95,9 @@ export function QueueJobCard({ job, apiBase, onAction }: QueueJobCardProps) {
             <p className="text-[10px] text-foreground-muted truncate mb-0.5">
               Channel: {channelName}
             </p>
+          )}
+          {job.manualTitleOverride && (
+            <p className="text-primary text-[10px] mb-0.5">Manual title override</p>
           )}
           {hasMetaLine && (
             <div className="flex items-center gap-1.5 mb-0.5">
@@ -121,6 +145,19 @@ export function QueueJobCard({ job, apiBase, onAction }: QueueJobCardProps) {
               <RefreshCw className="size-3.5" />
             </Button>
           )}
+          {canRename && (
+            <Button
+              size="icon-sm"
+              variant="ghost"
+              title="Rename"
+              onClick={() => {
+                setRenameTitle(job.title || '');
+                setShowRename(true);
+              }}
+            >
+              <Pencil className="size-3.5" />
+            </Button>
+          )}
           <Button
             size="icon-sm"
             variant="ghost"
@@ -144,6 +181,39 @@ export function QueueJobCard({ job, apiBase, onAction }: QueueJobCardProps) {
         </DialogContent>
       </Dialog>
     )}
+    <Dialog
+      open={showRename}
+      onOpenChange={(open) => {
+        setShowRename(open);
+        if (!open) {
+          setRenameTitle(job.title || '');
+        }
+      }}
+    >
+      <DialogContent className="max-w-md bg-background border-border">
+        <DialogTitle>Rename Queue Item</DialogTitle>
+        <DialogDescription>
+          Update the title before download so TMDb matching and the final Plex filename use the corrected name.
+        </DialogDescription>
+        <div className="space-y-3">
+          <Input
+            value={renameTitle}
+            onChange={(event) => setRenameTitle(event.target.value)}
+            placeholder="Enter the correct title"
+            disabled={isRenaming}
+            autoFocus
+          />
+          <div className="flex justify-end gap-2">
+            <Button variant="ghost" onClick={() => setShowRename(false)} disabled={isRenaming}>
+              Cancel
+            </Button>
+            <Button onClick={handleRenameSave} disabled={isRenaming || !String(renameTitle || '').trim()}>
+              Save
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
     </>
   );
 }
