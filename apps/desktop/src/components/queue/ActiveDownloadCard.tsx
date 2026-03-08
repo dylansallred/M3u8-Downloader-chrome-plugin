@@ -2,7 +2,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
-import { Play, Pause, RotateCcw, X, Cpu } from 'lucide-react';
+import { Play, Pause, RotateCcw, X, Cpu, ChevronLeft, ChevronRight } from 'lucide-react';
 import type { QueueJob, ActiveMetrics } from '@/types/queue';
 import { cn, formatBytesPerSecond, formatEta, formatRuntime, extractYear, getQueueStatusLabel, getQueuePrimaryAction, resolveJobStatus, resolveThumbnailUrl } from '@/lib/utils';
 import { SegmentHeatmap } from './SegmentHeatmap';
@@ -36,9 +36,22 @@ interface ActiveDownloadCardProps {
   metrics: ActiveMetrics;
   apiBase: string;
   onAction: (endpoint: string, method?: string, body?: unknown) => Promise<void>;
+  activeDownloadIndex?: number;
+  activeDownloadCount?: number;
+  onPrevActiveDownload?: () => void;
+  onNextActiveDownload?: () => void;
 }
 
-export function ActiveDownloadCard({ job, metrics, apiBase, onAction }: ActiveDownloadCardProps) {
+export function ActiveDownloadCard({
+  job,
+  metrics,
+  apiBase,
+  onAction,
+  activeDownloadIndex = -1,
+  activeDownloadCount = 0,
+  onPrevActiveDownload,
+  onNextActiveDownload,
+}: ActiveDownloadCardProps) {
   const primaryAction = getQueuePrimaryAction(job);
   const progress = Math.max(0, Math.min(100, Number(job?.progress || 0)));
   const jobStatus = resolveJobStatus(job);
@@ -55,6 +68,7 @@ export function ActiveDownloadCard({ job, metrics, apiBase, onAction }: ActiveDo
   const activeThreads = threads?.filter((t) => t.status === 'downloading').length ?? 0;
   const totalThreads = threads?.length ?? 0;
   const showHeatmap = isDownloading && (job?.totalSegments || 0) > 0 && job?.segmentStates;
+  const showActiveSwitcher = activeDownloadCount > 1 && activeDownloadIndex >= 0;
 
   if (!job) {
     return (
@@ -73,7 +87,7 @@ export function ActiveDownloadCard({ job, metrics, apiBase, onAction }: ActiveDo
             <img
               src={thumbnailUrl}
               alt=""
-              className="w-44 h-24 object-contain bg-black rounded shrink-0"
+              className="h-24 w-auto max-w-44 object-contain rounded shrink-0"
               loading="lazy"
               onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
             />
@@ -81,9 +95,36 @@ export function ActiveDownloadCard({ job, metrics, apiBase, onAction }: ActiveDo
           <div className="flex-1 min-w-0">
             <div className="flex items-center justify-between gap-2 mb-0.5">
               <p className="text-foreground font-medium text-sm truncate">{job.title || job.id}</p>
-              <Badge className={cn('text-[10px] uppercase tracking-wider shrink-0', statusBadgeClass(jobStatus))}>
-                {getQueueStatusLabel(jobStatus)}
-              </Badge>
+              <div className="flex items-center gap-1.5 shrink-0">
+                {showActiveSwitcher && (
+                  <div className="flex items-center gap-1">
+                    <Button
+                      size="icon-xs"
+                      variant="ghost"
+                      className="size-6"
+                      onClick={onPrevActiveDownload}
+                      title="Previous active download"
+                    >
+                      <ChevronLeft className="size-3.5" />
+                    </Button>
+                    <span className="text-[10px] text-foreground-muted tabular-nums min-w-8 text-center">
+                      {activeDownloadIndex + 1}/{activeDownloadCount}
+                    </span>
+                    <Button
+                      size="icon-xs"
+                      variant="ghost"
+                      className="size-6"
+                      onClick={onNextActiveDownload}
+                      title="Next active download"
+                    >
+                      <ChevronRight className="size-3.5" />
+                    </Button>
+                  </div>
+                )}
+                <Badge className={cn('text-[10px] uppercase tracking-wider', statusBadgeClass(jobStatus))}>
+                  {getQueueStatusLabel(jobStatus)}
+                </Badge>
+              </div>
             </div>
             {job.fallbackUsed && (
               <p className="text-primary text-[11px]">Fallback used: direct media URL</p>
@@ -132,7 +173,11 @@ export function ActiveDownloadCard({ job, metrics, apiBase, onAction }: ActiveDo
             <span>{job.completedSegments || 0}/{job.totalSegments || 0} segments</span>
           </div>
           <div className="relative">
-            <Progress value={progress} className="h-2" />
+            <Progress
+              value={progress}
+              className="h-2"
+              indicatorClassName={jobStatus === 'completed' ? 'bg-status-completed' : undefined}
+            />
             {isDownloading && (
               <div
                 className="absolute inset-0 h-2 rounded-full overflow-hidden"

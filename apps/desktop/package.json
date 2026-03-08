@@ -7,7 +7,7 @@
     "url": "https://github.com/dylansallred/M3u8-Downloader-chrome-plugin.git"
   },
   "main": "electron/main.js",
-  "description": "M3U8 Downloader Desktop",
+  "description": "VidSnag Desktop",
   "scripts": {
     "dev": "concurrently -k \"npm:dev:renderer\" \"npm:dev:electron\"",
     "dev:renderer": "vite",
@@ -49,8 +49,9 @@
   },
   "build": {
     "appId": "com.dylanallred.m3u8downloader",
-    "productName": "M3U8 Downloader",
+    "productName": "VidSnag",
     "directories": {
+      "buildResources": "build",
       "output": "dist-electron"
     },
     "files": [
@@ -73,6 +74,7 @@
       }
     ],
     "mac": {
+      "icon": "build/icon.icns",
       "target": [
         "dmg",
         "zip"
@@ -80,6 +82,7 @@
       "hardenedRuntime": true
     },
     "win": {
+      "icon": "build/icon.png",
       "target": [
         "nsis"
       ]

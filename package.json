@@ -20,7 +20,7 @@
     "lint": "eslint . --ext .js,.jsx,.ts,.tsx --cache --cache-location .eslintcache",
     "lint:fix": "npm run lint -- --fix",
     "typecheck:desktop": "tsc --noEmit --project apps/desktop/tsconfig.json",
-    "test": "node --test --test-force-exit tests/api.integration.test.js",
+    "test": "node --test --test-force-exit tests/api.integration.test.js tests/extension-title-inference.test.js",
     "test:e2e": "playwright test"
   },
   "devDependencies": {

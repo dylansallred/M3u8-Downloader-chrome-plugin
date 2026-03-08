@@ -33,7 +33,7 @@ export function useCompatibility(apiBase: string) {
     const now = Date.now();
     try {
       const res = await fetch(`${apiBase}/v1/health`, {
-        headers: { 'X-Client': 'fetchv-extension', 'X-Protocol-Version': '1' },
+        headers: { 'X-Client': 'vidsnag-extension', 'X-Protocol-Version': '1' },
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();

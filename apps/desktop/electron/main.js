@@ -157,6 +157,28 @@ function getBundledBinaryPath(binaryNames = []) {
   return '';
 }
 
+function getWindowIconPath() {
+  const candidateNames = ['icon.png'];
+  const candidates = [];
+  for (const name of candidateNames) {
+    candidates.push(path.join(process.resourcesPath || '', 'build', name));
+    candidates.push(path.join(app.getAppPath(), 'build', name));
+    candidates.push(path.join(__dirname, '..', 'build', name));
+  }
+
+  for (const candidate of candidates) {
+    try {
+      if (candidate && fs.existsSync(candidate)) {
+        return candidate;
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  return undefined;
+}
+
 function resolveHistoryFilePath(fileName) {
   const safeName = path.basename(String(fileName || ''));
   if (!safeName) return null;
@@ -496,6 +518,7 @@ function createWindow() {
     minWidth: 1024,
     minHeight: 720,
     show: false,
+    icon: getWindowIconPath(),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,

@@ -1,5 +1,5 @@
 /**
- * FetchV Media Detector
+ * VidSnag Media Detector
  *
  * Hooks fetch and XMLHttpRequest APIs to detect media files by analyzing
  * response headers, content types, and file extensions. This replaces the
@@ -121,7 +121,7 @@
         matchedBy,
       };
     } catch (error) {
-      console.error('[FetchV MediaDetector] Error analyzing response:', error);
+      console.error('[VidSnag MediaDetector] Error analyzing response:', error);
       return null;
     }
   }
@@ -138,7 +138,7 @@
         data: mediaInfo
       }, '*');
     } catch (error) {
-      console.error('[FetchV MediaDetector] Error sending detection message:', error);
+      console.error('[VidSnag MediaDetector] Error sending detection message:', error);
     }
   }
 
@@ -202,7 +202,7 @@
         }
       } catch (error) {
         // Non-critical error, don't break the fetch
-        console.error('[FetchV MediaDetector] Error processing fetch response:', error);
+        console.error('[VidSnag MediaDetector] Error processing fetch response:', error);
       }
 
       return response;
@@ -277,7 +277,7 @@
         }
       } catch (error) {
         // Non-critical error, don't break the XHR
-        console.error('[FetchV MediaDetector] Error processing XHR response:', error);
+        console.error('[VidSnag MediaDetector] Error processing XHR response:', error);
       }
     });
 
@@ -288,7 +288,7 @@
   // INITIALIZATION
   // ===================================================================
 
-  console.log('[FetchV] Media detection hooks installed');
+  console.log('[VidSnag] Media detection hooks installed');
 
   // Optional: Clean up detected media set periodically to prevent memory leaks
   setInterval(() => {
@@ -300,7 +300,7 @@
     // with timestamps instead
     if (detectedMedia.size > 1000) {
       detectedMedia.clear();
-      console.log('[FetchV MediaDetector] Cleared detection cache (size limit reached)');
+      console.log('[VidSnag MediaDetector] Cleared detection cache (size limit reached)');
     }
   }, 5 * 60 * 1000); // Check every 5 minutes
 

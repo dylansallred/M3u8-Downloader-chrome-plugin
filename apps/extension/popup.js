@@ -32,10 +32,10 @@ function showToast(message, variant = 'info', timeoutMs = 2600) {
   if (!toastRegion) return;
 
   const palette = {
-    success: { bg: 'rgba(16, 185, 129, 0.18)', border: 'rgba(16, 185, 129, 0.45)', fg: '#ecfdf5' },
+    success: { bg: 'rgba(182, 60, 8, 0.2)', border: 'rgba(182, 60, 8, 0.5)', fg: '#fff4ef' },
     error: { bg: 'rgba(239, 68, 68, 0.18)', border: 'rgba(239, 68, 68, 0.45)', fg: '#fee2e2' },
-    warning: { bg: 'rgba(245, 158, 11, 0.18)', border: 'rgba(245, 158, 11, 0.45)', fg: '#fffbeb' },
-    info: { bg: 'rgba(59, 130, 246, 0.18)', border: 'rgba(59, 130, 246, 0.45)', fg: '#eff6ff' },
+    warning: { bg: 'rgba(245, 158, 11, 0.2)', border: 'rgba(245, 158, 11, 0.5)', fg: '#fffbeb' },
+    info: { bg: 'rgba(190, 173, 165, 0.18)', border: 'rgba(190, 173, 165, 0.42)', fg: '#f8f3f0' },
   };
   const style = palette[variant] || palette.info;
 
@@ -192,7 +192,7 @@ async function fetchHealth() {
   try {
     const res = await fetch(`${API_BASE}/v1/health`, {
       headers: {
-        'X-Client': 'fetchv-extension',
+        'X-Client': 'vidsnag-extension',
         'X-Protocol-Version': String(EXTENSION_PROTOCOL_VERSION),
       },
     });
@@ -357,7 +357,7 @@ async function sendJob(item, queueButton = null) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'X-Client': 'fetchv-extension',
+        'X-Client': 'vidsnag-extension',
         'X-Protocol-Version': String(EXTENSION_PROTOCOL_VERSION),
         'X-Extension-Version': String(extensionInfo?.version || ''),
       },
@@ -378,7 +378,7 @@ async function sendJob(item, queueButton = null) {
     showToast(`Queued: ${data.jobId} (position ${data.queuePosition + 1})`, 'success');
   } catch (err) {
     if (!health) {
-      showToast('Desktop app is not reachable. Open M3U8 Downloader desktop app and retry.', 'error', 3600);
+      showToast('Desktop app is not reachable. Open the VidSnag desktop app and retry.', 'error', 3600);
       return;
     }
     const message = err && err.message ? err.message : String(err || 'Unknown error');
@@ -511,6 +511,7 @@ function isLikelyTitleNoise(value, source = '') {
   if (text.length < 2 || text.length > 140) return true;
   if (/^https?:\/\//i.test(raw)) return true;
   if (/^\d+(?:\s+\d+)*$/.test(lower)) return true;
+  if (GENERIC_LOOKUP_TITLE_RE.test(text)) return true;
   if (/^(go back|back|home|menu|close|play|pause|next|previous)$/i.test(lower)) return true;
   if (/^season\s*\d{1,2}(?:\s*episode(?:\s*\d{1,3})?)?$/i.test(lower)) return true;
 
@@ -663,6 +664,8 @@ function normalizeTitleText(value) {
     .trim();
 }
 
+const GENERIC_LOOKUP_TITLE_RE = /^(index|playlist|master|chunklist|manifest|media|video|stream|subtitle|subtitles|caption|captions|closed captions|cc|audio|audio track|audio tracks|quality|qualities|server|servers|source|sources)$/i;
+
 function cleanYoutubeTitleText(value) {
   return String(value || '')
     .replace(/^\(\d+\)\s*/, '')
@@ -679,7 +682,7 @@ function isYoutubePageItem(item) {
 }
 
 function stripTitleNoise(value) {
-  return normalizeTitleText(value)
+  const cleaned = normalizeTitleText(value)
     .replace(/(?:^|[^a-z0-9])s(?:eason)?\s*0*\d{1,2}\s*[-_. ]*e(?:pisode)?\s*0*\d{1,3}(?:[^a-z0-9]|$)/gi, ' ')
     .replace(/(?:^|[^a-z0-9])\d{1,2}\s*x\s*\d{1,3}(?:[^a-z0-9]|$)/gi, ' ')
     .replace(/(?:^|[^a-z0-9])season\s*0*\d{1,2}(?:[^a-z0-9]|$)/gi, ' ')
@@ -687,6 +690,7 @@ function stripTitleNoise(value) {
     .replace(/[()[\]{}]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
+  return GENERIC_LOOKUP_TITLE_RE.test(cleaned) ? '' : cleaned;
 }
 
 function trimDebugText(value, max = 260) {
@@ -859,6 +863,10 @@ function inferTitleHints(item, pageTitle, displayTitle) {
   const isYoutubePageDetection = isYoutubePageItem(item);
   const sourcePageUrl = String(item && item.sourcePageUrl || (activeTab && activeTab.url) || '').trim();
   const sourceUrlHint = isYoutubePageDetection ? null : inferHintFromSourcePageUrl(sourcePageUrl);
+  const tvContextFromUrl = detectTvContextFromUrl(sourcePageUrl);
+  const preferredContentTitle = isYoutubePageDetection
+    ? ''
+    : pickPreferredContentTitle(item, pageTitle, tvContextFromUrl);
   const decodedFilename = decodeFilenameCandidate(item && item.filename);
   const pageCandidates = Array.isArray(item && item.pageTitleCandidates)
     ? item.pageTitleCandidates
@@ -947,20 +955,14 @@ function inferTitleHints(item, pageTitle, displayTitle) {
   ].filter((candidate) => String(candidate.value || '').trim());
 
   if (isYoutubePageDetection) {
-    const lookupSource = cleanYoutubeTitleText(
-      (youtubeMetadata && youtubeMetadata.title)
-      || displayTitle
-      || pageTitle
-      || (item && item.filename)
-      || ''
-    );
-    const lookupTitle = stripTitleNoise(
-      lookupSource
-      || cleanYoutubeTitleText(displayTitle)
-      || cleanYoutubeTitleText(pageTitle)
-      || (item && item.filename)
-      || ''
-    );
+    const lookupTitle = [
+      cleanYoutubeTitleText((youtubeMetadata && youtubeMetadata.title) || ''),
+      cleanYoutubeTitleText(displayTitle),
+      cleanYoutubeTitleText(pageTitle),
+      item && item.filename,
+    ]
+      .map((candidate) => stripTitleNoise(candidate))
+      .find(Boolean) || '';
     const candidateTitles = candidates.map((candidate) => ({
       field: candidate.field,
       label: candidate.label,
@@ -1060,11 +1062,14 @@ function inferTitleHints(item, pageTitle, displayTitle) {
     ? String(candidates.find((candidate) => candidate.field === matched.matchedField)?.value || '').trim()
     : '';
   const matchedLookup = stripTitleNoise(matchedSource);
-  const source = matchedLookup
-    ? matchedSource
-    : (displayTitle || pageTitle || (item && item.filename) || '');
-  const lookupTitle = stripTitleNoise(source);
-  const tvContextFromUrl = detectTvContextFromUrl(sourcePageUrl);
+  const lookupTitle = matchedLookup || [
+    preferredContentTitle,
+    pageTitle,
+    displayTitle,
+    item && item.filename,
+  ]
+    .map((candidate) => stripTitleNoise(candidate))
+    .find(Boolean) || '';
   const pageIsTvContext = Boolean(item && item.pageIsTvContext);
   const hasEpisodeSignal = Boolean(
     matched
@@ -1529,7 +1534,7 @@ async function refreshConnection() {
     if (compatibilityIssue) {
       applyCompatibilityUi();
     } else {
-      setStatus(`Desktop connected (${data.appVersion})`);
+      setStatus(`App connected (${data.appVersion})`);
     }
   } catch (err) {
     compatibilityIssue = null;

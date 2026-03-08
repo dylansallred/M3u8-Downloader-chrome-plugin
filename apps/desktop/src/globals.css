@@ -4,56 +4,56 @@
 @custom-variant dark (&:is(.dark *));
 
 @theme {
-  --color-background: hsl(228 14% 7%);
-  --color-background-raised: hsl(228 12% 9.5%);
-  --color-background-hover: hsl(228 10% 12%);
-  --color-background-active: hsl(228 10% 14%);
+  --color-background: hsl(222 16% 6%);
+  --color-background-raised: hsl(222 14% 8%);
+  --color-background-hover: hsl(222 12% 11%);
+  --color-background-active: hsl(222 12% 13%);
 
-  --color-foreground: hsl(228 20% 93%);
-  --color-foreground-muted: hsl(228 8% 52%);
-  --color-foreground-subtle: hsl(228 6% 38%);
+  --color-foreground: hsl(20 20% 93%);
+  --color-foreground-muted: hsl(20 6% 60%);
+  --color-foreground-subtle: hsl(20 5% 44%);
 
-  --color-border: hsl(228 10% 15%);
-  --color-border-subtle: hsl(228 8% 12%);
+  --color-border: hsl(221 10% 18%);
+  --color-border-subtle: hsl(221 8% 12%);
 
-  --color-primary: hsl(153 56% 52%);
-  --color-primary-foreground: hsl(228 14% 7%);
-  --color-primary-muted: hsl(153 40% 16%);
+  --color-primary: hsl(18 96% 44%);
+  --color-primary-foreground: hsl(20 35% 96%);
+  --color-primary-muted: hsl(16 58% 16%);
 
-  --color-accent: hsl(228 10% 14%);
-  --color-accent-foreground: hsl(228 20% 93%);
+  --color-accent: hsl(221 12% 14%);
+  --color-accent-foreground: hsl(20 20% 93%);
 
-  --color-secondary: hsl(228 10% 16%);
-  --color-secondary-foreground: hsl(228 20% 93%);
+  --color-secondary: hsl(221 10% 16%);
+  --color-secondary-foreground: hsl(20 20% 93%);
 
-  --color-muted: hsl(228 10% 14%);
-  --color-muted-foreground: hsl(228 8% 52%);
+  --color-muted: hsl(221 10% 14%);
+  --color-muted-foreground: hsl(20 8% 58%);
 
-  --color-input: hsl(228 10% 18%);
+  --color-input: hsl(222 10% 18%);
 
-  --color-popover: hsl(228 12% 11%);
-  --color-popover-foreground: hsl(228 20% 93%);
+  --color-popover: hsl(222 12% 10%);
+  --color-popover-foreground: hsl(20 20% 93%);
 
-  --color-card: hsl(228 12% 9.5%);
-  --color-card-foreground: hsl(228 20% 93%);
+  --color-card: hsl(222 12% 9%);
+  --color-card-foreground: hsl(20 20% 93%);
 
   --color-destructive: hsl(0 72% 56%);
   --color-destructive-muted: hsl(0 40% 16%);
 
-  --color-ring: hsl(153 56% 52%);
+  --color-ring: hsl(18 96% 44%);
 
-  --color-status-downloading: hsl(174 50% 42%);
-  --color-status-queued: hsl(220 50% 55%);
-  --color-status-paused: hsl(38 50% 52%);
-  --color-status-completed: hsl(153 50% 45%);
-  --color-status-failed: hsl(0 60% 55%);
-  --color-status-cancelled: hsl(0 20% 45%);
+  --color-status-downloading: hsl(18 88% 50%);
+  --color-status-queued: hsl(214 84% 60%);
+  --color-status-paused: hsl(44 84% 58%);
+  --color-status-completed: hsl(145 62% 46%);
+  --color-status-failed: hsl(0 72% 58%);
+  --color-status-cancelled: hsl(220 8% 52%);
 
-  --color-segment-pending: hsl(228 10% 22%);
-  --color-segment-downloading: hsl(199 80% 55%);
-  --color-segment-completed: hsl(153 50% 45%);
-  --color-segment-retrying: hsl(38 50% 52%);
-  --color-segment-failed: hsl(0 60% 55%);
+  --color-segment-pending: hsl(222 10% 24%);
+  --color-segment-downloading: hsl(36 98% 55%);
+  --color-segment-completed: hsl(145 62% 46%);
+  --color-segment-retrying: hsl(44 88% 58%);
+  --color-segment-failed: hsl(0 72% 58%);
 
   --font-sans: "Inter Variable", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --font-mono: "JetBrains Mono", "SF Mono", "Fira Code", monospace;

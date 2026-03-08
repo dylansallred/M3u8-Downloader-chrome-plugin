@@ -85,7 +85,11 @@ export function QueueJobCard({ job, apiBase, onAction }: QueueJobCardProps) {
             </div>
           )}
           <div className="flex items-center gap-2">
-            <Progress value={progress} className="h-1 flex-1" />
+            <Progress
+              value={progress}
+              className="h-1 flex-1"
+              indicatorClassName={jobStatus === 'completed' ? 'bg-status-completed' : undefined}
+            />
             <span className="text-[11px] text-foreground-muted w-8 text-right shrink-0">{progress}%</span>
           </div>
           {job.fallbackUsed && (

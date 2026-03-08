@@ -932,8 +932,13 @@ function createApiServer(options = {}) {
     const client = String(req.headers[HEADER.client.toLowerCase()] || '').trim();
     const protocolVersion = String(req.headers[HEADER.protocolVersion.toLowerCase()] || '').trim();
     const compatibility = getCompatibilityInfo();
+    const allowedClients = new Set([
+      CLIENT.extension,
+      'fetchv-extension',
+      'vidsnag-extension',
+    ]);
 
-    if (client && client !== CLIENT.extension) {
+    if (client && !allowedClients.has(client)) {
       res.status(400).json({ error: `Invalid ${HEADER.client} header` });
       return;
     }

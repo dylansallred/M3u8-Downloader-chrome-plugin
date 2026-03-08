@@ -19,6 +19,7 @@ function createJobProcessor({
   const DIRECT_MAX_ATTEMPTS = 4;
   const YT_DLP_PATH = String(process.env.YTDLP_PATH || process.env.YT_DLP_PATH || 'yt-dlp').trim() || 'yt-dlp';
   let ytDlpAvailable = null;
+  const isExplicitYtDlpPath = /[\\/]/.test(YT_DLP_PATH);
 
   function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
@@ -48,9 +49,17 @@ function createJobProcessor({
         stdio: 'ignore',
         timeout: 5000,
       });
-      ytDlpAvailable = probe.status === 0;
+      if (probe.status === 0) {
+        ytDlpAvailable = true;
+      } else if (probe.error && probe.error.code === 'ETIMEDOUT' && isExplicitYtDlpPath && fs.existsSync(YT_DLP_PATH)) {
+        // Keep parity with API startup detection: trust explicit/bundled binary path on probe timeout.
+        ytDlpAvailable = true;
+        logger.info('yt-dlp probe timed out; using configured path', { ytDlpPath: YT_DLP_PATH });
+      } else {
+        ytDlpAvailable = false;
+      }
     } catch {
-      ytDlpAvailable = false;
+      ytDlpAvailable = isExplicitYtDlpPath && fs.existsSync(YT_DLP_PATH);
     }
 
     if (!ytDlpAvailable) {
@@ -94,6 +103,28 @@ function createJobProcessor({
     }
   }
 
+  async function resolveAccessibleOutputPath(candidatePath, storageDir, jobId) {
+    const raw = String(candidatePath || '').trim();
+    if (raw) {
+      const fullPath = path.isAbsolute(raw) ? raw : path.resolve(storageDir, raw);
+      try {
+        await fsPromises.access(fullPath);
+        return fullPath;
+      } catch {
+        // Fall back to scanning known outputs if reported path is stale/missing.
+      }
+    }
+
+    const latest = await findLatestJobAsset(storageDir, jobId);
+    if (!latest) return '';
+    try {
+      await fsPromises.access(latest);
+      return latest;
+    } catch {
+      return '';
+    }
+  }
+
   async function runYouTubeDirectJob(job) {
     if (!job || !job.url) {
       throw new Error('Missing job URL for yt-dlp download');
@@ -110,10 +141,26 @@ function createJobProcessor({
     job.storageDir = storageDir;
 
     const outputTemplate = path.join(storageDir, `${job.id}-%(title).120B.%(ext)s`);
+    let ffmpegLocation = '';
+    if (typeof FFMPEG_PATH === 'string' && FFMPEG_PATH.trim()) {
+      const normalizedFfmpegPath = FFMPEG_PATH.trim();
+      try {
+        if (fs.existsSync(normalizedFfmpegPath)) {
+          const stats = fs.statSync(normalizedFfmpegPath);
+          ffmpegLocation = stats.isDirectory()
+            ? normalizedFfmpegPath
+            : path.dirname(normalizedFfmpegPath);
+        }
+      } catch {
+        ffmpegLocation = '';
+      }
+    }
+
     const args = [
       '--ignore-config',
       '--no-playlist',
       '--no-part',
+      '--no-keep-video',
       '--progress',
       '--no-quiet',
       '--newline',
@@ -121,8 +168,11 @@ function createJobProcessor({
       '--restrict-filenames',
       '--merge-output-format',
       'mp4',
+      '--remux-video',
+      'mp4',
       '-f',
-      'bv*+ba/b',
+      // Prefer MP4-compatible streams first to avoid split mp4(video)+webm(audio) outputs.
+      'bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/bv*+ba/b',
       '--progress-template',
       'download:bytes=%(progress.downloaded_bytes)s,total=%(progress.total_bytes)s,total_estimate=%(progress.total_bytes_estimate)s,speed=%(progress.speed)s,eta=%(progress.eta)s',
       '--print',
@@ -131,6 +181,10 @@ function createJobProcessor({
       outputTemplate,
       job.url,
     ];
+
+    if (ffmpegLocation) {
+      args.push('--ffmpeg-location', ffmpegLocation);
+    }
 
     const rawHeaders = job.headers && typeof job.headers === 'object' ? job.headers : {};
     for (const [rawKey, rawValue] of Object.entries(rawHeaders)) {
@@ -451,13 +505,11 @@ function createJobProcessor({
       resolvedPath = await findLatestJobAsset(storageDir, job.id);
     }
 
-    const safePath = String(resolvedPath || '').trim();
-    if (!safePath) {
+    const finalPath = await resolveAccessibleOutputPath(resolvedPath, storageDir, job.id);
+    if (!finalPath) {
       throw new Error('yt-dlp completed but no output file was reported');
     }
 
-    const finalPath = path.isAbsolute(safePath) ? safePath : path.resolve(storageDir, safePath);
-    await fsPromises.access(finalPath);
     const stats = await fsPromises.stat(finalPath);
 
     job.filePath = finalPath;
