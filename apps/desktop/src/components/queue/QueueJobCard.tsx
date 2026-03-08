@@ -45,6 +45,7 @@ export function QueueJobCard({ job, apiBase, onAction }: QueueJobCardProps) {
   const thumbnailUrl = resolveThumbnailUrl(job.thumbnailUrls?.[0], apiBase);
   const year = extractYear(job.tmdbReleaseDate);
   const genres = job.tmdbMetadata?.genres?.slice(0, 2) ?? [];
+  const channelName = String(job.youtubeMetadata?.channelName || '').trim();
   const hasMetaLine = year || genres.length > 0;
 
   return (
@@ -69,6 +70,11 @@ export function QueueJobCard({ job, apiBase, onAction }: QueueJobCardProps) {
               {getQueueStatusLabel(jobStatus)}
             </Badge>
           </div>
+          {channelName && (
+            <p className="text-[10px] text-foreground-muted truncate mb-0.5">
+              Channel: {channelName}
+            </p>
+          )}
           {hasMetaLine && (
             <div className="flex items-center gap-1.5 mb-0.5">
               {year && <span className="text-[10px] text-foreground-muted">{year}</span>}
@@ -79,7 +85,11 @@ export function QueueJobCard({ job, apiBase, onAction }: QueueJobCardProps) {
             </div>
           )}
           <div className="flex items-center gap-2">
-            <Progress value={progress} className="h-1 flex-1" />
+            <Progress
+              value={progress}
+              className="h-1 flex-1"
+              indicatorClassName={jobStatus === 'completed' ? 'bg-status-completed' : undefined}
+            />
             <span className="text-[11px] text-foreground-muted w-8 text-right shrink-0">{progress}%</span>
           </div>
           {job.fallbackUsed && (

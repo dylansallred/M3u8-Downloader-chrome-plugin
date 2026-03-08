@@ -90,9 +90,7 @@ export const SegmentHeatmap = memo(function SegmentHeatmap({ totalSegments, segm
         if (row >= visibleRows) continue;
         const x = col * step;
         const y = row * step;
-        ctx.beginPath();
-        ctx.roundRect(x, y, cellSize, cellSize, 1);
-        ctx.fill();
+        ctx.fillRect(x, y, cellSize, cellSize);
       }
     }
   }, [totalSegments, segmentStates]);
@@ -145,7 +143,7 @@ export const SegmentHeatmap = memo(function SegmentHeatmap({ totalSegments, segm
     <div ref={containerRef} className="relative w-full">
       <canvas
         ref={canvasRef}
-        className="w-full cursor-crosshair rounded"
+        className="w-full cursor-crosshair"
         onMouseMove={handleMouseMove}
         onMouseLeave={handleMouseLeave}
       />

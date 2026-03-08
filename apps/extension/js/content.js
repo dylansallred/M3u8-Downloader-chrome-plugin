@@ -79,6 +79,172 @@
     return parsed;
   }
 
+  function parseLargePositiveInt(value, max = 9_999_999_999_999) {
+    const parsed = Number.parseInt(String(value || '').replace(/[^\d]/g, ''), 10);
+    if (!Number.isFinite(parsed) || parsed <= 0) return null;
+    return Math.min(max, parsed);
+  }
+
+  function isYoutubeHost(rawHost) {
+    const host = String(rawHost || '').trim().toLowerCase();
+    return host === 'youtube.com'
+      || host.endsWith('.youtube.com')
+      || host === 'youtu.be'
+      || host.endsWith('.youtu.be');
+  }
+
+  function extractYoutubeVideoIdFromUrl(rawUrl) {
+    try {
+      const parsed = new URL(String(rawUrl || '').trim());
+      if (!isYoutubeHost(parsed.hostname)) return '';
+
+      const host = String(parsed.hostname || '').toLowerCase();
+      const parts = String(parsed.pathname || '').split('/').filter(Boolean);
+      let videoId = '';
+
+      if (host === 'youtu.be' || host.endsWith('.youtu.be')) {
+        videoId = String(parts[0] || '').trim();
+      } else {
+        const firstPart = String(parts[0] || '').toLowerCase();
+        if (firstPart === 'watch') {
+          videoId = String(parsed.searchParams.get('v') || '').trim();
+        } else if (firstPart === 'shorts' || firstPart === 'live' || firstPart === 'embed') {
+          videoId = String(parts[1] || '').trim();
+        }
+      }
+
+      if (!/^[A-Za-z0-9_-]{6,20}$/.test(videoId)) return '';
+      return videoId;
+    } catch {
+      return '';
+    }
+  }
+
+  function parseIsoDurationToSeconds(value) {
+    const raw = String(value || '').trim().toUpperCase();
+    if (!raw || !raw.startsWith('PT')) return null;
+
+    const hourMatch = raw.match(/(\d+)H/);
+    const minuteMatch = raw.match(/(\d+)M/);
+    const secondMatch = raw.match(/(\d+)S/);
+    const hours = hourMatch ? Number.parseInt(hourMatch[1], 10) : 0;
+    const minutes = minuteMatch ? Number.parseInt(minuteMatch[1], 10) : 0;
+    const seconds = secondMatch ? Number.parseInt(secondMatch[1], 10) : 0;
+    const total = (hours * 3600) + (minutes * 60) + seconds;
+    if (!Number.isFinite(total) || total <= 0) return null;
+    return total;
+  }
+
+  function cleanYoutubeTitle(rawTitle) {
+    const title = normalizeText(rawTitle);
+    if (!title) return '';
+    return title
+      .replace(/^\(\d+\)\s*/, '')
+      .replace(/^\[\d+\]\s*/, '')
+      .replace(/\s*[-|]\s*youtube\s*$/i, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  function collectYoutubeFocusedCandidates(store) {
+    const titleSelectors = [
+      'h1.ytd-watch-metadata yt-formatted-string',
+      '#above-the-fold #title h1',
+      '#title h1',
+      'h1.title',
+    ];
+    for (const selector of titleSelectors) {
+      const nodes = Array.from(document.querySelectorAll(selector)).slice(0, 4);
+      for (const node of nodes) {
+        addCandidate(store, 'youtube.dom.title', node.textContent || '', 4);
+      }
+    }
+
+    const channelSelectors = [
+      '#owner #channel-name a',
+      'ytd-watch-metadata ytd-channel-name a',
+      '#upload-info ytd-channel-name a',
+      'ytd-channel-name a[href*="/@"]',
+      'ytd-channel-name a[href*="/channel/"]',
+    ];
+    for (const selector of channelSelectors) {
+      const nodes = Array.from(document.querySelectorAll(selector)).slice(0, 4);
+      for (const node of nodes) {
+        addCandidate(store, 'youtube.dom.channel', node.textContent || '', 16);
+      }
+    }
+  }
+
+  function collectYoutubePageMetadata(sourcePageUrl) {
+    const videoId = extractYoutubeVideoIdFromUrl(sourcePageUrl);
+    if (!videoId) return null;
+
+    const title = cleanYoutubeTitle(
+      (document.querySelector('meta[property="og:title"]') || {}).content
+      || document.title
+      || ''
+    );
+
+    const channelMeta = (document.querySelector('meta[itemprop="author"]') || {}).content;
+    const channelNode = document.querySelector([
+      '#owner #channel-name a',
+      'ytd-channel-name a',
+      '#upload-info ytd-channel-name a',
+      '#text-container a[href*="/@"]',
+      '#text-container a[href*="/channel/"]',
+    ].join(','));
+
+    const channelName = normalizeText(
+      (channelNode && channelNode.textContent) || channelMeta || ''
+    );
+    const channelUrl = normalizeText(
+      (channelNode && channelNode.href)
+      || ((document.querySelector('link[itemprop="name"]') || {}).href)
+      || ''
+    );
+
+    const channelId = normalizeText(
+      (document.querySelector('meta[itemprop="channelId"]') || {}).content
+      || ''
+    );
+    const uploadDate = normalizeText(
+      (document.querySelector('meta[itemprop="datePublished"]') || {}).content
+      || (document.querySelector('meta[property="datePublished"]') || {}).content
+      || ''
+    );
+    const durationIso = normalizeText(
+      (document.querySelector('meta[itemprop="duration"]') || {}).content
+      || ''
+    );
+    const durationSeconds = parseIsoDurationToSeconds(durationIso);
+    const viewCount = parseLargePositiveInt(
+      (document.querySelector('meta[itemprop="interactionCount"]') || {}).content
+      || ''
+    );
+    const thumbnailUrl = normalizeText(
+      (document.querySelector('meta[property="og:image"]') || {}).content
+      || ''
+    );
+    const description = normalizeText(
+      (document.querySelector('meta[property="og:description"]') || {}).content
+      || (document.querySelector('meta[name="description"]') || {}).content
+      || ''
+    );
+
+    return {
+      videoId,
+      title: trimText(title, 240),
+      channelName: trimText(channelName, 180),
+      channelUrl: trimText(channelUrl, 300),
+      channelId: trimText(channelId, 80),
+      uploadDate: trimText(uploadDate, 64),
+      durationSeconds: Number.isFinite(durationSeconds) ? durationSeconds : null,
+      viewCount: Number.isFinite(viewCount) ? viewCount : null,
+      thumbnailUrl: trimText(thumbnailUrl, 300),
+      description: trimText(description, 500),
+    };
+  }
+
   function inferEpisodeHint(text, source) {
     const normalized = normalizeTitleText(text);
     if (!normalized) return null;
@@ -471,6 +637,9 @@
 
   function collectPageContext() {
     const candidates = new Map();
+    const sourcePageUrl = window.location.href || '';
+    const youtubeMetadata = collectYoutubePageMetadata(sourcePageUrl);
+    const isYoutubePage = Boolean(youtubeMetadata && youtubeMetadata.videoId);
 
     addCandidate(candidates, 'document.title', document.title, 5);
 
@@ -486,76 +655,85 @@
       addCandidate(candidates, selector, node.getAttribute('content') || '', 8);
     }
 
-    const watchedNodes = Array.from(document.querySelectorAll([
-      'h1',
-      'h2',
-      'h3',
-      '[data-title]',
-      '[data-name]',
-      '[data-season]',
-      '[data-episode]',
-      '[data-ep]',
-      '[data-season-number]',
-      '[data-episode-number]',
-      '[aria-label*="episode" i]',
-      '[data-testid*="title" i]',
-      '[data-testid*="episode" i]',
-      '[class*="episode" i]',
-      '[id*="episode" i]',
-      '[class*="title" i]',
-      '[id*="title" i]',
-    ].join(','))).slice(0, MAX_DOM_NODES);
+    if (isYoutubePage) {
+      collectYoutubeFocusedCandidates(candidates);
+    } else {
+      const watchedNodes = Array.from(document.querySelectorAll([
+        'h1',
+        'h2',
+        'h3',
+        '[data-title]',
+        '[data-name]',
+        '[data-season]',
+        '[data-episode]',
+        '[data-ep]',
+        '[data-season-number]',
+        '[data-episode-number]',
+        '[aria-label*="episode" i]',
+        '[data-testid*="title" i]',
+        '[data-testid*="episode" i]',
+        '[class*="episode" i]',
+        '[id*="episode" i]',
+        '[class*="title" i]',
+        '[id*="title" i]',
+      ].join(','))).slice(0, MAX_DOM_NODES);
 
-    for (const node of watchedNodes) {
-      addCandidate(candidates, 'dom.text', node.textContent || '', 25);
-      addCandidate(candidates, 'dom.aria-label', node.getAttribute && node.getAttribute('aria-label'), 24);
-      addCandidate(candidates, 'dom.title-attr', node.getAttribute && node.getAttribute('title'), 24);
-      addCandidate(candidates, 'dom.data-title', node.getAttribute && node.getAttribute('data-title'), 24);
-      addCandidate(candidates, 'dom.data-name', node.getAttribute && node.getAttribute('data-name'), 24);
+      for (const node of watchedNodes) {
+        addCandidate(candidates, 'dom.text', node.textContent || '', 25);
+        addCandidate(candidates, 'dom.aria-label', node.getAttribute && node.getAttribute('aria-label'), 24);
+        addCandidate(candidates, 'dom.title-attr', node.getAttribute && node.getAttribute('title'), 24);
+        addCandidate(candidates, 'dom.data-title', node.getAttribute && node.getAttribute('data-title'), 24);
+        addCandidate(candidates, 'dom.data-name', node.getAttribute && node.getAttribute('data-name'), 24);
 
-      const seasonNumber = parsePositiveInt(
-        node.getAttribute && (
-          node.getAttribute('data-season')
-          || node.getAttribute('data-season-number')
-          || node.getAttribute('data-s')
-        ),
-        1,
-        60
-      );
-      const episodeNumber = parsePositiveInt(
-        node.getAttribute && (
-          node.getAttribute('data-episode')
-          || node.getAttribute('data-episode-number')
-          || node.getAttribute('data-ep')
-          || node.getAttribute('data-e')
-        ),
-        1,
-        999
-      );
-
-      if (seasonNumber || episodeNumber) {
-        addCandidate(
-          candidates,
-          'dom.data-episode-hint',
-          `season ${seasonNumber || ''} episode ${episodeNumber || ''}`,
-          10
+        const seasonNumber = parsePositiveInt(
+          node.getAttribute && (
+            node.getAttribute('data-season')
+            || node.getAttribute('data-season-number')
+            || node.getAttribute('data-s')
+          ),
+          1,
+          60
         );
+        const episodeNumber = parsePositiveInt(
+          node.getAttribute && (
+            node.getAttribute('data-episode')
+            || node.getAttribute('data-episode-number')
+            || node.getAttribute('data-ep')
+            || node.getAttribute('data-e')
+          ),
+          1,
+          999
+        );
+
+        if (seasonNumber || episodeNumber) {
+          addCandidate(
+            candidates,
+            'dom.data-episode-hint',
+            `season ${seasonNumber || ''} episode ${episodeNumber || ''}`,
+            10
+          );
+        }
+      }
+
+      const videos = Array.from(document.querySelectorAll('video')).slice(0, 3);
+      for (const video of videos) {
+        const container = video.closest('section,article,main,div');
+        if (!container) continue;
+        const localNodes = Array.from(container.querySelectorAll('h1,h2,h3,[class*="title" i],[class*="episode" i],[data-title],[aria-label]')).slice(0, 20);
+        for (const node of localNodes) {
+          addCandidate(candidates, 'player.text', node.textContent || '', 12);
+          addCandidate(candidates, 'player.aria-label', node.getAttribute && node.getAttribute('aria-label'), 12);
+        }
       }
     }
 
-    const videos = Array.from(document.querySelectorAll('video')).slice(0, 3);
-    for (const video of videos) {
-      const container = video.closest('section,article,main,div');
-      if (!container) continue;
-      const localNodes = Array.from(container.querySelectorAll('h1,h2,h3,[class*="title" i],[class*="episode" i],[data-title],[aria-label]')).slice(0, 20);
-      for (const node of localNodes) {
-        addCandidate(candidates, 'player.text', node.textContent || '', 12);
-        addCandidate(candidates, 'player.aria-label', node.getAttribute && node.getAttribute('aria-label'), 12);
-      }
+    if (youtubeMetadata && youtubeMetadata.title) {
+      addCandidate(candidates, 'youtube.title', youtubeMetadata.title, 3);
     }
-
-    const sourcePageUrl = window.location.href || '';
-    const sourceUrlEpisodeHint = extractEpisodeHintFromSourceUrl(sourcePageUrl);
+    if (youtubeMetadata && youtubeMetadata.channelName) {
+      addCandidate(candidates, 'youtube.channel', youtubeMetadata.channelName, 18);
+    }
+    const sourceUrlEpisodeHint = isYoutubePage ? null : extractEpisodeHintFromSourceUrl(sourcePageUrl);
     if (sourceUrlEpisodeHint) {
       addCandidate(
         candidates,
@@ -565,8 +743,8 @@
       );
     }
 
-    const structuredHint = collectJsonLdCandidates(candidates);
-    const resourceSignals = collectResourceSignals(candidates);
+    const structuredHint = isYoutubePage ? null : collectJsonLdCandidates(candidates);
+    const resourceSignals = isYoutubePage ? [] : collectResourceSignals(candidates);
 
     try {
       const parsed = new URL(window.location.href);
@@ -586,7 +764,7 @@
       }));
 
     let episodeHint = sourceUrlEpisodeHint || structuredHint;
-    if (!episodeHint) {
+    if (!episodeHint && !isYoutubePage) {
       const resourceEpisodeHint = pickBestEpisodeSignal(resourceSignals);
       if (resourceEpisodeHint) {
         episodeHint = {
@@ -599,7 +777,7 @@
       }
     }
 
-    if (!episodeHint) {
+    if (!episodeHint && !isYoutubePage) {
       for (const entry of sortedCandidates) {
         const hint = inferEpisodeHint(entry.value, entry.source);
         if (hint) {
@@ -609,17 +787,20 @@
       }
     }
 
-    const isTvContext = Boolean(
-      detectTvContextFromUrl(sourcePageUrl)
-      || sourceUrlEpisodeHint
-      || episodeHint
-      || resourceSignals.length > 0
-      || sortedCandidates.some((entry) => /\b(episode|season|series)\b/i.test(String(entry.value || '')))
-    );
+    const isTvContext = isYoutubePage
+      ? false
+      : Boolean(
+        detectTvContextFromUrl(sourcePageUrl)
+        || sourceUrlEpisodeHint
+        || episodeHint
+        || resourceSignals.length > 0
+        || sortedCandidates.some((entry) => /\b(episode|season|series)\b/i.test(String(entry.value || '')))
+      );
 
     return {
       sourcePageTitle: document.title || '',
       sourcePageUrl,
+      youtubeMetadata,
       pageTitleCandidates: sortedCandidates,
       resourceSignals,
       pageEpisodeHint: episodeHint
@@ -651,13 +832,95 @@
     contextDirty = true;
   }
 
+  function buildYoutubePageMediaFromContext(pageContext) {
+    if (!pageContext || typeof pageContext !== 'object') return null;
+    const metadata = pageContext.youtubeMetadata && typeof pageContext.youtubeMetadata === 'object'
+      ? pageContext.youtubeMetadata
+      : null;
+    if (!metadata) return null;
+
+    const videoId = String(metadata.videoId || '').trim();
+    if (!/^[A-Za-z0-9_-]{6,20}$/.test(videoId)) return null;
+
+    const canonicalUrl = `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`;
+    const title = String(metadata.title || '').trim();
+    const sourcePageTitle = String(pageContext.sourcePageTitle || title || document.title || '').trim();
+    const sourcePageUrl = String(pageContext.sourcePageUrl || window.location.href || canonicalUrl).trim();
+
+    return {
+      url: canonicalUrl,
+      method: 'PAGE_DOM',
+      statusCode: 200,
+      contentType: 'video/youtube',
+      contentLength: 0,
+      contentDisposition: '',
+      filename: `${videoId}.youtube`,
+      requestHeaders: {},
+      mediaKind: 'youtube-page',
+      matchedBy: ['dom-youtube-metadata'],
+      sourcePageTitle,
+      sourcePageUrl,
+      pageTitleCandidates: Array.isArray(pageContext.pageTitleCandidates) ? pageContext.pageTitleCandidates : [],
+      resourceSignals: Array.isArray(pageContext.resourceSignals) ? pageContext.resourceSignals : [],
+      pageEpisodeHint: pageContext.pageEpisodeHint || null,
+      pageIsTvContext: Boolean(pageContext.pageIsTvContext),
+      pageContextCollectedAt: pageContext.collectedAt || Date.now(),
+      youtubeMetadata: metadata,
+    };
+  }
+
+  let youtubeSyncTimer = null;
+  let lastYoutubeSyncSignature = '';
+
+  function syncYoutubePageMedia(force = false) {
+    if (window.top !== window) return;
+
+    const pageContext = getPageContextSnapshot();
+    const media = buildYoutubePageMediaFromContext(pageContext);
+    if (!media) return;
+
+    const metadata = media.youtubeMetadata || {};
+    const signature = [
+      media.url,
+      media.sourcePageTitle || '',
+      String(metadata.title || '').trim(),
+      String(metadata.channelName || '').trim(),
+      String(metadata.uploadDate || '').trim(),
+      Number(metadata.durationSeconds || 0),
+      Number(metadata.viewCount || 0),
+    ].join('|');
+
+    if (!force && signature && signature === lastYoutubeSyncSignature) return;
+    lastYoutubeSyncSignature = signature;
+
+    chrome.runtime.sendMessage({
+      cmd: 'STORE_DETECTED_MEDIA',
+      media,
+    });
+  }
+
+  function scheduleYoutubePageMediaSync(delayMs = 300) {
+    if (window.top !== window) return;
+    if (youtubeSyncTimer) {
+      clearTimeout(youtubeSyncTimer);
+    }
+    youtubeSyncTimer = setTimeout(() => {
+      youtubeSyncTimer = null;
+      syncYoutubePageMedia();
+    }, Math.max(80, Number(delayMs) || 300));
+  }
+
   document.addEventListener('visibilitychange', markContextDirty, { passive: true });
+  document.addEventListener('visibilitychange', () => scheduleYoutubePageMediaSync(260), { passive: true });
   window.addEventListener('hashchange', markContextDirty, { passive: true });
   window.addEventListener('popstate', markContextDirty, { passive: true });
+  window.addEventListener('hashchange', () => scheduleYoutubePageMediaSync(180), { passive: true });
+  window.addEventListener('popstate', () => scheduleYoutubePageMediaSync(180), { passive: true });
 
   try {
     const observer = new MutationObserver(() => {
       markContextDirty();
+      scheduleYoutubePageMediaSync(320);
     });
     const root = document.documentElement || document.body;
     if (root) {
@@ -672,6 +935,8 @@
   } catch {
     // Ignore observer failures.
   }
+
+  scheduleYoutubePageMediaSync(120);
 
   const script = document.createElement('script');
   script.src = chrome.runtime.getURL('js/media-detector.js');
@@ -699,6 +964,7 @@
         ? pageContext.resourceSignals
         : [],
       pageEpisodeHint: pageContext.pageEpisodeHint || null,
+      youtubeMetadata: pageContext.youtubeMetadata || null,
       pageIsTvContext: Boolean(pageContext.pageIsTvContext),
       pageContextCollectedAt: pageContext.collectedAt || Date.now(),
     };

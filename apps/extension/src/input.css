@@ -4,28 +4,30 @@
    THEME
    ================================================================ */
 @theme {
-  --color-bg-base: #0b1020;
-  --color-bg-elevated: #111833;
-  --color-bg-surface: rgba(23, 29, 50, 0.6);
-  --color-bg-surface-hover: rgba(30, 38, 65, 0.7);
-  --color-bg-input: rgba(17, 24, 49, 0.8);
+  --color-bg-base: #080a0f;
+  --color-bg-elevated: #11151d;
+  --color-bg-surface: rgba(20, 24, 33, 0.72);
+  --color-bg-surface-hover: rgba(27, 32, 44, 0.82);
+  --color-bg-input: rgba(16, 20, 30, 0.92);
 
-  --color-fg: #ecf2ff;
-  --color-fg-muted: #8a9dc4;
-  --color-fg-subtle: #5f7199;
+  --color-fg: #f3ece8;
+  --color-fg-muted: #beada5;
+  --color-fg-subtle: #887973;
 
-  --color-border: rgba(42, 53, 88, 0.6);
-  --color-border-subtle: rgba(42, 53, 88, 0.3);
-  --color-border-glow: rgba(49, 196, 141, 0.25);
+  --color-border: rgba(85, 64, 58, 0.5);
+  --color-border-subtle: rgba(85, 64, 58, 0.3);
+  --color-border-glow: rgba(182, 60, 8, 0.42);
 
-  --color-accent: #31c48d;
-  --color-accent-hover: #28a374;
-  --color-accent-muted: rgba(49, 196, 141, 0.12);
-  --color-accent-glow: rgba(49, 196, 141, 0.15);
+  --color-accent: #b63c08;
+  --color-accent-hover: #cf4711;
+  --color-accent-muted: rgba(182, 60, 8, 0.16);
+  --color-accent-glow: rgba(182, 60, 8, 0.26);
 
   --color-danger: #e16b6b;
   --color-danger-hover: #c75555;
   --color-danger-muted: rgba(225, 107, 107, 0.12);
+  --color-success: #22c55e;
+  --color-success-glow: rgba(34, 197, 94, 0.28);
 
   --font-sans: "Inter", "Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif;
   --font-mono: "SF Mono", "Fira Code", "Consolas", monospace;
@@ -63,7 +65,7 @@ body {
   height: 600px;
   max-height: 600px;
   margin: 0;
-  background: linear-gradient(160deg, var(--color-bg-elevated), var(--color-bg-base));
+  background: radial-gradient(circle at top left, rgba(182, 60, 8, 0.2), transparent 38%), linear-gradient(160deg, var(--color-bg-elevated), var(--color-bg-base));
   color: var(--color-fg);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
@@ -76,6 +78,34 @@ body {
 header,
 footer {
   flex-shrink: 0;
+}
+
+.popup-header {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.header-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 24px;
+}
+
+.header-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 14px;
+}
+
+#connectionStatus {
+  display: block;
+  flex: 1 1 auto;
+  min-width: 0;
+  line-height: 1.15;
+  word-break: break-word;
 }
 
 #detectedMediaSection {
@@ -101,6 +131,18 @@ footer {
   min-height: 100%;
 }
 
+.toast-region {
+  position: fixed;
+  top: 10px;
+  left: 12px;
+  right: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  z-index: 999;
+  pointer-events: none;
+}
+
 /* ================================================================
    GLASSMORPHISM COMPONENTS
    ================================================================ */
@@ -114,7 +156,7 @@ footer {
 }
 
 .glass-subtle {
-  background: rgba(23, 29, 50, 0.35);
+  background: rgba(20, 24, 33, 0.5);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   border: 1px solid var(--color-border-subtle);
@@ -126,7 +168,7 @@ footer {
 }
 .glass-glow:hover {
   border-color: var(--color-border-glow);
-  box-shadow: 0 0 20px var(--color-accent-glow), inset 0 0 20px rgba(49, 196, 141, 0.03);
+  box-shadow: 0 0 20px var(--color-accent-glow), inset 0 0 20px rgba(182, 60, 8, 0.06);
 }
 
 /* ================================================================
@@ -140,8 +182,8 @@ footer {
   flex-shrink: 0;
 }
 .status-dot.connected {
-  background: var(--color-accent);
-  box-shadow: 0 0 8px var(--color-accent-glow);
+  background: var(--color-success);
+  box-shadow: 0 0 8px var(--color-success-glow);
   animation: var(--animate-pulse-glow);
 }
 .status-dot.disconnected {
@@ -176,21 +218,30 @@ footer {
 }
 .btn:hover {
   background: var(--color-bg-surface-hover);
-  border-color: rgba(42, 53, 88, 0.9);
+  border-color: rgba(126, 92, 82, 0.7);
 }
 .btn:active {
   transform: scale(0.97);
 }
 
 .btn-primary {
-  background: linear-gradient(135deg, #1c7b55, #1a6b4a);
-  border-color: rgba(49, 196, 141, 0.3);
-  color: #e0fff0;
+  background: linear-gradient(135deg, #a23608, #8e2f06);
+  border-color: rgba(182, 60, 8, 0.48);
+  color: #fff4ef;
 }
 .btn-primary:hover {
-  background: linear-gradient(135deg, #218d62, #1c7b55);
-  border-color: rgba(49, 196, 141, 0.5);
+  background: linear-gradient(135deg, #b73f10, #a23608);
+  border-color: rgba(221, 87, 28, 0.62);
   box-shadow: 0 0 12px var(--color-accent-glow);
+}
+
+.btn-subtle {
+  background: rgba(20, 24, 33, 0.65);
+  border-color: rgba(85, 64, 58, 0.5);
+}
+.btn-subtle:hover {
+  background: rgba(27, 32, 44, 0.85);
+  border-color: rgba(126, 92, 82, 0.72);
 }
 
 .btn-ghost {
@@ -235,8 +286,8 @@ footer {
   letter-spacing: 0.08em;
 }
 .input:focus {
-  border-color: rgba(49, 196, 141, 0.4);
-  box-shadow: 0 0 0 3px rgba(49, 196, 141, 0.08);
+  border-color: rgba(182, 60, 8, 0.55);
+  box-shadow: 0 0 0 3px rgba(182, 60, 8, 0.12);
 }
 
 /* ================================================================
@@ -254,13 +305,13 @@ footer {
 }
 .pill-accent {
   background: var(--color-accent-muted);
-  color: #9ef3cb;
-  border: 1px solid rgba(49, 196, 141, 0.2);
+  color: #ffc5ab;
+  border: 1px solid rgba(182, 60, 8, 0.35);
 }
 .pill-muted {
-  background: rgba(138, 157, 196, 0.1);
+  background: rgba(190, 173, 165, 0.1);
   color: var(--color-fg-muted);
-  border: 1px solid rgba(138, 157, 196, 0.15);
+  border: 1px solid rgba(190, 173, 165, 0.2);
 }
 
 /* ================================================================
@@ -272,6 +323,10 @@ footer {
   align-items: center;
   gap: 6px;
   margin-top: 8px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid rgba(85, 64, 58, 0.45);
+  background: rgba(16, 20, 30, 0.7);
 }
 
 .url-text {
@@ -279,19 +334,19 @@ footer {
   min-width: 0;
   font-family: var(--font-mono);
   font-size: 0.6875rem;
-  color: var(--color-fg-subtle);
+  color: #cdbeb7;
   line-height: 1.5;
   white-space: nowrap;
   overflow-x: auto;
   overflow-y: hidden;
-  padding: 4px 0;
+  padding: 2px 0;
 }
 
 .url-text::-webkit-scrollbar {
   height: 3px;
 }
 .url-text::-webkit-scrollbar-thumb {
-  background: rgba(42, 53, 88, 0.4);
+  background: rgba(85, 64, 58, 0.45);
   border-radius: 999px;
 }
 
@@ -317,7 +372,40 @@ footer {
 }
 .btn-copy.copied {
   color: var(--color-accent);
-  border-color: rgba(49, 196, 141, 0.3);
+  border-color: rgba(182, 60, 8, 0.48);
+}
+
+.btn-icon-accent {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border-radius: 8px;
+  border: 1px solid rgba(182, 60, 8, 0.35);
+  background: rgba(182, 60, 8, 0.1);
+  color: #ffc5ab;
+  cursor: pointer;
+  transition: all 150ms ease;
+  line-height: 0;
+}
+
+.btn-icon-accent:hover {
+  background: rgba(182, 60, 8, 0.18);
+  border-color: rgba(221, 87, 28, 0.55);
+}
+
+.btn-icon-accent:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.btn-icon-accent svg,
+.btn-copy svg,
+.btn-icon-danger svg {
+  display: block;
 }
 
 .btn-icon-danger {
@@ -355,7 +443,7 @@ footer {
   padding: 8px 10px;
   border-radius: 8px;
   border: 1px solid var(--color-border-subtle);
-  background: rgba(17, 24, 49, 0.45);
+  background: rgba(16, 20, 30, 0.55);
 }
 
 .details-summary {
@@ -381,7 +469,29 @@ footer {
   font-family: var(--font-mono);
   font-size: 0.625rem;
   line-height: 1.45;
-  color: var(--color-fg-subtle);
+  color: #c9bab4;
+  padding: 10px 42px 10px 10px;
+}
+
+.details-json::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+.details-json-wrap {
+  position: relative;
+  border: 1px solid rgba(85, 64, 58, 0.45);
+  border-radius: 8px;
+  background: rgba(11, 14, 22, 0.88);
+  overflow: hidden;
+}
+
+.details-json-copy {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 2;
+  background: rgba(16, 20, 30, 0.9);
+  border-color: rgba(85, 64, 58, 0.55);
 }
 
 /* ================================================================
@@ -395,9 +505,9 @@ footer {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(42, 53, 88, 0.5);
+  background: rgba(85, 64, 58, 0.55);
   border-radius: 999px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(42, 53, 88, 0.8);
+  background: rgba(126, 92, 82, 0.72);
 }

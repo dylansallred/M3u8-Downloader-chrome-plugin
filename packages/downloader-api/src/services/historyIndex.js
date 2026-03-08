@@ -201,14 +201,12 @@ class HistoryIndexService {
         const rel = this.toRelativePath(job.filePath);
         if (rel) {
           byFile.set(rel, job);
-          byFile.set(path.basename(rel), job);
         }
       }
       if (job.mp4Path) {
         const rel = this.toRelativePath(job.mp4Path);
         if (rel) {
           byFile.set(rel, job);
-          byFile.set(path.basename(rel), job);
         }
       }
     }
@@ -313,11 +311,23 @@ class HistoryIndexService {
       if (activeJobFiles.has(relativePath) || activeJobFiles.has(fileName)) return null;
     }
 
-    const job = jobLookup.get(relativePath) || jobLookup.get(fileName) || null;
     const extractedJobId = extractHistoryJobId(fileName);
     const validJobId = extractedJobId && isValidHistoryJobId(extractedJobId)
       ? extractedJobId
       : null;
+    const job = jobLookup.get(relativePath)
+      || (validJobId ? this.jobs.get(validJobId) : null)
+      || null;
+
+    if (validJobId) {
+      const associatedJob = this.jobs.get(validJobId) || job;
+      if (associatedJob) {
+        const associatedStatus = String(associatedJob.queueStatus || associatedJob.status || '').trim();
+        if (associatedStatus && !TERMINAL_STATUSES.has(associatedStatus)) {
+          return null;
+        }
+      }
+    }
 
     const thumbnailUrl = this.findThumbnailUrl({
       validJobId,
@@ -339,6 +349,7 @@ class HistoryIndexService {
       thumbnailUrl,
       tmdbReleaseDate: (job && job.tmdbReleaseDate) || null,
       tmdbMetadata: (job && job.tmdbMetadata) || null,
+      youtubeMetadata: (job && job.youtubeMetadata) || null,
     };
   }
 

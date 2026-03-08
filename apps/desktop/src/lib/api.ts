@@ -54,7 +54,7 @@ export function createApiClient(baseUrl: string) {
     // Health
     getHealth: () =>
       fetch(`${baseUrl}/v1/health`, {
-        headers: { 'X-Client': 'fetchv-extension', 'X-Protocol-Version': '1' },
+        headers: { 'X-Client': 'vidsnag-extension', 'X-Protocol-Version': '1' },
       }).then((r) => r.json()),
 
     // Raw request for custom calls

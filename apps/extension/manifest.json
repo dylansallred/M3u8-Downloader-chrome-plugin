@@ -1,11 +1,11 @@
 {
   "manifest_version": 3,
-  "name": "M3U8 Desktop Bridge",
-  "description": "Detect media streams and send downloads to the local Electron app.",
+  "name": "VidSnag Bridge",
+  "description": "Detect media streams and send downloads to the local VidSnag app.",
   "version": "1.0.0",
   "action": {
     "default_popup": "popup.html",
-    "default_title": "M3U8 Desktop Bridge",
+    "default_title": "VidSnag Bridge",
     "default_icon": {
       "16": "img/icon-16.png",
       "48": "img/icon-48.png",

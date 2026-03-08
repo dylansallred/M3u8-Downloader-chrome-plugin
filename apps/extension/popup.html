@@ -3,24 +3,26 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>FetchV Bridge</title>
+    <title>VidSnag Bridge</title>
     <link rel="stylesheet" href="popup.css" />
   </head>
   <body>
     <!-- Header -->
-    <header class="flex items-center justify-between px-3.5 pt-3.5 pb-2">
-      <div class="flex items-center gap-2">
-        <h1 class="text-sm font-semibold tracking-tight text-fg">FetchV</h1>
-        <span class="pill pill-muted">Bridge</span>
+    <header class="popup-header px-3.5 pt-3 pb-1.5">
+      <div class="header-top">
+        <div class="flex items-center gap-2">
+          <img src="img/vidsnag-logo-title.png" alt="VidSnag" class="h-5 w-auto object-contain" />
+          <span class="pill pill-muted">Bridge</span>
+        </div>
       </div>
-      <div class="flex items-center gap-2">
+      <div class="header-status">
         <span id="statusDot" class="status-dot checking"></span>
         <span id="connectionStatus" class="text-xs text-fg-muted">Checking...</span>
       </div>
     </header>
 
     <!-- Detected Media -->
-    <section id="detectedMediaSection" class="glass mx-3.5 mb-2.5 mt-1.5 p-3.5">
+    <section id="detectedMediaSection" class="glass mx-3.5 mb-2.5 mt-1 p-3.5">
       <div class="flex items-center justify-between mb-1">
         <h2 class="text-sm font-semibold text-fg">Detected Media</h2>
         <button id="refreshButton" class="btn btn-ghost text-xs px-2 py-1">

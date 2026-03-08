@@ -15,4 +15,8 @@ export interface HistoryItem {
     tagline?: string;
     genres?: string[];
   } | null;
+  youtubeMetadata?: {
+    channelName?: string;
+    channelUrl?: string;
+  } | null;
 }

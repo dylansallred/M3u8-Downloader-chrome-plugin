@@ -22,7 +22,12 @@ export function QueueView({
   onQueueSettingsSync,
 }: QueueViewProps) {
   const queue = useQueue(apiBase);
-  const { activeJob, activeMetrics } = useActiveJob(queue.queueData, apiBase);
+  const { activeJob, activeMetrics, setActiveJobId } = useActiveJob(queue.queueData, apiBase);
+  const downloadingJobs = (queue.queueData.queue || []).filter((job) => job.queueStatus === 'downloading');
+  const activeDownloadIndex = activeJob
+    ? downloadingJobs.findIndex((job) => job.id === activeJob.id)
+    : -1;
+  const activeDownloadCount = downloadingJobs.length;
 
   useEffect(() => {
     const next = queue.queueData.settings;
@@ -41,6 +46,26 @@ export function QueueView({
         metrics={activeMetrics}
         apiBase={apiBase}
         onAction={queue.callAction}
+        activeDownloadIndex={activeDownloadIndex}
+        activeDownloadCount={activeDownloadCount}
+        onPrevActiveDownload={
+          activeDownloadCount > 1 && activeDownloadIndex >= 0
+            ? () => {
+              const nextIndex = (activeDownloadIndex - 1 + activeDownloadCount) % activeDownloadCount;
+              const nextJob = downloadingJobs[nextIndex];
+              if (nextJob) setActiveJobId(nextJob.id);
+            }
+            : undefined
+        }
+        onNextActiveDownload={
+          activeDownloadCount > 1 && activeDownloadIndex >= 0
+            ? () => {
+              const nextIndex = (activeDownloadIndex + 1) % activeDownloadCount;
+              const nextJob = downloadingJobs[nextIndex];
+              if (nextJob) setActiveJobId(nextJob.id);
+            }
+            : undefined
+        }
       />
       <QueueToolbar
         filterText={queue.filterText}

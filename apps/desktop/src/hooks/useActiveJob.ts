@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { QueueData, QueueJob, ActiveMetrics } from '@/types/queue';
 import { createApiClient } from '@/lib/api';
 
@@ -6,92 +6,149 @@ const TERMINAL_STATUSES = new Set(['completed', 'failed', 'cancelled']);
 const SPEED_HOLD_WINDOW_MS = 4_000;
 const ETA_HOLD_WINDOW_MS = 6_000;
 const SPEED_DROP_TO_ZERO_MS = 20_000;
+const MIN_SAMPLE_INTERVAL_MS = 750;
+const MIN_SAMPLE_BYTES = 32 * 1024;
 
-interface ActiveSample {
-  jobId: string;
+interface JobSample {
   timeMs: number;
   bytes: number;
   lastByteChangeAt: number;
 }
 
-interface MetricsState {
+interface JobMetricState {
   speedBps: number;
   etaSeconds: number | null;
   lastEtaAt: number;
 }
 
+// Keep estimator state across Queue tab unmount/remount.
+const persistedSampleByJobId = new Map<string, JobSample>();
+const persistedMetricStateByJobId = new Map<string, JobMetricState>();
+const persistedMetricsByJobId = new Map<string, ActiveMetrics>();
+const persistedJobDetailsById = new Map<string, QueueJob>();
+
+function resolveJobStatus(job: QueueJob): string {
+  return String(job.queueStatus || job.status || '').toLowerCase();
+}
+
+function buildJobMetrics(job: QueueJob): ActiveMetrics {
+  const status = resolveJobStatus(job);
+  if (status !== 'downloading') {
+    return { speedBps: 0, etaSeconds: null };
+  }
+
+  const bytes = Number(job.bytesDownloaded || 0);
+  const totalBytes = Number(job.totalBytes || 0);
+  const progress = Number(job.progress || 0);
+  const serverSpeed = Number(job.speedBps || 0);
+  const speedBps = Number.isFinite(serverSpeed) && serverSpeed > 0 ? serverSpeed : 0;
+
+  const rawEta = Number(job.etaSeconds);
+  if (Number.isFinite(rawEta) && rawEta > 0) {
+    return { speedBps, etaSeconds: rawEta };
+  }
+
+  if (speedBps > 1 && Number.isFinite(totalBytes) && totalBytes > bytes) {
+    return { speedBps, etaSeconds: (totalBytes - bytes) / speedBps };
+  }
+
+  if (speedBps > 1 && progress > 0 && progress < 100) {
+    const estimatedTotalBytes = bytes / (progress / 100);
+    const remainingBytes = Math.max(0, estimatedTotalBytes - bytes);
+    return { speedBps, etaSeconds: remainingBytes / speedBps };
+  }
+
+  return { speedBps, etaSeconds: null };
+}
+
 export function useActiveJob(queueData: QueueData, apiBase: string) {
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
-  const [activeJob, setActiveJob] = useState<QueueJob | null>(null);
-  const [activeMetrics, setActiveMetrics] = useState<ActiveMetrics>({ speedBps: 0, etaSeconds: null });
-  const activeSampleRef = useRef<ActiveSample | null>(null);
-  const metricsRef = useRef<MetricsState>({ speedBps: 0, etaSeconds: null, lastEtaAt: 0 });
-  const activeJobIdRef = useRef<string | null>(null);
+  const [activeJobDetails, setActiveJobDetails] = useState<QueueJob | null>(null);
+  const [metricsByJobId, setMetricsByJobId] = useState<Map<string, ActiveMetrics>>(
+    () => new Map(persistedMetricsByJobId),
+  );
+  const sampleByJobIdRef = useRef<Map<string, JobSample>>(persistedSampleByJobId);
+  const metricStateByJobIdRef = useRef<Map<string, JobMetricState>>(persistedMetricStateByJobId);
 
+  const queue = Array.isArray(queueData.queue) ? queueData.queue : [];
   const api = useMemo(() => createApiClient(apiBase), [apiBase]);
 
-  // Keep ref in sync with state
+  const activeJob = useMemo(() => {
+    if (!activeJobId) return null;
+    const baseJob = queue.find((job) => job.id === activeJobId) || null;
+    if (!baseJob) return null;
+    if (activeJobDetails && activeJobDetails.id === baseJob.id) {
+      return { ...baseJob, ...activeJobDetails };
+    }
+    return baseJob;
+  }, [queue, activeJobId, activeJobDetails]);
+
+  const mergedQueue = useMemo(() => (
+    queue.map((job) => {
+      if (activeJobDetails && activeJobDetails.id === job.id) {
+        return { ...job, ...activeJobDetails };
+      }
+      return job;
+    })
+  ), [queue, activeJobDetails]);
+
   useEffect(() => {
-    activeJobIdRef.current = activeJobId;
-  }, [activeJobId]);
-
-  // Handle incoming job data — clear immediately if terminal
-  const handleJobUpdate = useCallback((job: QueueJob) => {
-    if (job.id !== activeJobIdRef.current) return;
-
-    const status = job.queueStatus || job.status;
-    if (TERMINAL_STATUSES.has(status || '')) {
-      activeJobIdRef.current = null;
+    if (queue.length === 0) {
       setActiveJobId(null);
-      setActiveJob(null);
       return;
     }
 
-    setActiveJob(job);
-  }, []);
+    const preferred = queue.find((j) => {
+      const status = resolveJobStatus(j);
+      return status === 'downloading' || status === 'queued' || status === 'paused';
+    });
 
-  // Auto-select active job from queue
-  useEffect(() => {
-    if (!queueData.queue || queueData.queue.length === 0) {
+    if (!preferred) {
       setActiveJobId(null);
-      setActiveJob(null);
       return;
     }
 
-    const nextActive = queueData.queue.find(
-      (j) => j.queueStatus === 'downloading' || j.queueStatus === 'queued' || j.queueStatus === 'paused',
-    );
-
-    if (!nextActive) {
-      setActiveJobId(null);
-      setActiveJob(null);
+    const hasCurrent = !!activeJobId && queue.some((j) => j.id === activeJobId);
+    if (!hasCurrent) {
+      setActiveJobId(preferred.id);
       return;
     }
 
-    if (!activeJobId || !queueData.queue.some((q) => q.id === activeJobId)) {
-      setActiveJobId(nextActive.id);
+    const current = queue.find((j) => j.id === activeJobId);
+    if (current && TERMINAL_STATUSES.has(resolveJobStatus(current))) {
+      setActiveJobId(preferred.id);
     }
-  }, [queueData, activeJobId]);
+  }, [queue, activeJobId]);
 
-  // WebSocket subscription + poll fallback (only polls when WS is down)
+  // Subscribe to active job detail so segment/thread state is always available for the heatmap.
   useEffect(() => {
-    if (!activeJobId) return;
+    if (!activeJobId) {
+      setActiveJobDetails(null);
+      return;
+    }
+
+    setActiveJobDetails(persistedJobDetailsById.get(activeJobId) || null);
 
     let ws: WebSocket | null = null;
     let wsConnected = false;
     let pollTimer: ReturnType<typeof setTimeout> | null = null;
     let cancelled = false;
+    const wsUrl = `${apiBase.replace('http', 'ws').replace(/\/+$/, '')}/ws`;
 
-    const wsUrl = `${apiBase.replace('http', 'ws')}/ws`;
+    const applyDetail = (job: QueueJob | null) => {
+      if (!job || job.id !== activeJobId || cancelled) return;
+      persistedJobDetailsById.set(job.id, job);
+      setActiveJobDetails(job);
+    };
 
     const poll = async () => {
       if (wsConnected || cancelled) return;
       try {
         const job = await api.getJob(activeJobId);
-        if (!cancelled && job) handleJobUpdate(job);
+        applyDetail(job || null);
         if (!cancelled) schedulePoll(1000);
       } catch {
-        if (!cancelled) schedulePoll(5000);
+        if (!cancelled) schedulePoll(3000);
       }
     };
 
@@ -105,24 +162,29 @@ export function useActiveJob(queueData: QueueData, apiBase: string) {
       ws = new WebSocket(wsUrl);
       ws.onopen = () => {
         wsConnected = true;
-        ws!.send(JSON.stringify({ type: 'subscribe', jobId: activeJobId }));
+        ws?.send(JSON.stringify({ type: 'subscribe', jobId: activeJobId }));
       };
       ws.onmessage = (event) => {
-        const message = JSON.parse(event.data);
-        if (message?.type === 'job:update' && message?.data?.id === activeJobId) {
-          if (!cancelled) handleJobUpdate(message.data);
+        try {
+          const message = JSON.parse(String(event.data || ''));
+          if (message?.type === 'job:update' && message?.data?.id === activeJobId) {
+            applyDetail(message.data as QueueJob);
+          }
+        } catch {
+          // Ignore malformed messages.
         }
       };
-      ws.onerror = () => {};
       ws.onclose = () => {
         wsConnected = false;
         if (!cancelled) schedulePoll(1000);
       };
+      ws.onerror = () => {
+        // onclose handles fallback polling
+      };
     } catch {
-      // WS failed to connect; fall back to polling immediately
+      // Fall through to polling.
     }
 
-    // Initial fetch + start polling as fallback until WS connects
     poll();
 
     return () => {
@@ -130,80 +192,115 @@ export function useActiveJob(queueData: QueueData, apiBase: string) {
       if (pollTimer) clearTimeout(pollTimer);
       if (ws && ws.readyState === WebSocket.OPEN) ws.close();
     };
-  }, [activeJobId, apiBase, api, handleJobUpdate]);
+  }, [activeJobId, api, apiBase]);
 
-  // Speed/ETA metrics calculation
   useEffect(() => {
-    const job = activeJob;
-    if (!job || !activeJobId) {
-      activeSampleRef.current = null;
-      metricsRef.current = { speedBps: 0, etaSeconds: null, lastEtaAt: 0 };
-      setActiveMetrics({ speedBps: 0, etaSeconds: null });
-      return;
-    }
-
-    const status = String(job.queueStatus || job.status || '');
     const now = Date.now();
-    const bytes = Number(job.bytesDownloaded || 0);
-    const prev = activeSampleRef.current;
-    let speedBps = Number(metricsRef.current.speedBps || 0);
+    const nextMetrics = new Map<string, ActiveMetrics>();
+    const sampleByJobId = sampleByJobIdRef.current;
+    const metricStateByJobId = metricStateByJobIdRef.current;
+    const seenJobIds = new Set<string>();
 
-    if (prev && prev.jobId === activeJobId && bytes >= prev.bytes) {
-      const dt = Math.max(0.001, (now - prev.timeMs) / 1000);
-      const db = bytes - prev.bytes;
-      if (db > 0) {
-        const instant = db / dt;
-        speedBps = speedBps > 0 ? (speedBps * 0.72) + (instant * 0.28) : instant;
-        prev.lastByteChangeAt = now;
-      } else if (status === 'downloading') {
-        const idleMs = now - prev.lastByteChangeAt;
-        if (idleMs > SPEED_HOLD_WINDOW_MS) {
-          if (idleMs >= SPEED_DROP_TO_ZERO_MS) {
-            speedBps = 0;
-          } else {
-            // Gradual decay for brief stalls so speed/ETA do not flicker.
-            speedBps *= 0.92;
+    for (const job of mergedQueue) {
+      seenJobIds.add(job.id);
+      const status = resolveJobStatus(job);
+      const bytes = Number(job.bytesDownloaded || 0);
+      const totalBytes = Number(job.totalBytes || 0);
+      const progress = Number(job.progress || 0);
+      const rawServerSpeed = Number(job.speedBps || 0);
+      const serverSpeed = Number.isFinite(rawServerSpeed) && rawServerSpeed > 0 ? rawServerSpeed : 0;
+      const rawServerEta = Number(job.etaSeconds);
+      const serverEta = Number.isFinite(rawServerEta) && rawServerEta > 0 ? rawServerEta : null;
+      const sampleTime = Number.isFinite(Number(job.updatedAt)) && Number(job.updatedAt) > 0
+        ? Number(job.updatedAt)
+        : now;
+
+      const prevSample = (sampleByJobId.get(job.id) || {
+        timeMs: sampleTime,
+        bytes,
+        lastByteChangeAt: sampleTime,
+      }) as JobSample;
+      const prevMetric = metricStateByJobId.get(job.id) || {
+        speedBps: 0,
+        etaSeconds: null,
+        lastEtaAt: 0,
+      };
+
+      let speedBps = Number(prevMetric.speedBps || 0);
+      if (status !== 'downloading') {
+        speedBps = 0;
+      } else if (serverSpeed > 0) {
+        speedBps = speedBps > 0 ? (speedBps * 0.2) + (serverSpeed * 0.8) : serverSpeed;
+      } else {
+        const dtMs = Math.max(0, sampleTime - prevSample.timeMs);
+        const dt = Math.max(0.001, dtMs / 1000);
+        const db = Math.max(0, bytes - prevSample.bytes);
+        if (db >= MIN_SAMPLE_BYTES && dtMs >= MIN_SAMPLE_INTERVAL_MS) {
+          const instant = db / dt;
+          const clampedInstant = speedBps > 0 ? Math.min(instant, speedBps * 2.5) : instant;
+          speedBps = speedBps > 0 ? (speedBps * 0.75) + (clampedInstant * 0.25) : clampedInstant;
+        } else {
+          const idleMs = sampleTime - prevSample.lastByteChangeAt;
+          if (idleMs > SPEED_HOLD_WINDOW_MS) {
+            speedBps = idleMs >= SPEED_DROP_TO_ZERO_MS ? 0 : speedBps * 0.92;
           }
         }
-      } else {
+      }
+
+      if (!Number.isFinite(speedBps) || speedBps < 0) {
         speedBps = 0;
       }
-    } else {
-      speedBps = 0;
+
+      let etaSeconds: number | null = null;
+      if (status !== 'downloading') {
+        etaSeconds = null;
+      } else if (serverEta != null) {
+        etaSeconds = serverEta;
+      } else if (speedBps > 1 && Number.isFinite(totalBytes) && totalBytes > bytes) {
+        etaSeconds = (totalBytes - bytes) / speedBps;
+      } else if (speedBps > 1 && progress > 0 && progress < 100) {
+        const estimatedTotalBytes = bytes / (progress / 100);
+        const remainingBytes = Math.max(0, estimatedTotalBytes - bytes);
+        etaSeconds = remainingBytes / speedBps;
+      } else if (
+        prevMetric.etaSeconds != null
+        && now - Number(prevMetric.lastEtaAt || 0) <= ETA_HOLD_WINDOW_MS
+      ) {
+        etaSeconds = prevMetric.etaSeconds;
+      }
+
+      nextMetrics.set(job.id, { speedBps, etaSeconds });
+      sampleByJobId.set(job.id, {
+        timeMs: sampleTime,
+        bytes,
+        lastByteChangeAt: bytes > prevSample.bytes ? sampleTime : prevSample.lastByteChangeAt,
+      });
+      metricStateByJobId.set(job.id, {
+        speedBps,
+        etaSeconds,
+        lastEtaAt: etaSeconds != null ? now : prevMetric.lastEtaAt,
+      });
     }
 
-    if (!Number.isFinite(speedBps) || speedBps < 0) {
-      speedBps = 0;
+    for (const jobId of Array.from(sampleByJobId.keys())) {
+      if (!seenJobIds.has(jobId)) {
+        sampleByJobId.delete(jobId);
+        metricStateByJobId.delete(jobId);
+        persistedMetricsByJobId.delete(jobId);
+        persistedJobDetailsById.delete(jobId);
+      }
     }
 
-    activeSampleRef.current = {
-      jobId: activeJobId,
-      timeMs: now,
-      bytes,
-      lastByteChangeAt: prev && prev.jobId === activeJobId ? prev.lastByteChangeAt : now,
-    };
-
-    let etaSeconds: number | null = null;
-    const progress = Number(job.progress || 0);
-    if (status === 'downloading' && speedBps > 1 && progress > 0 && progress < 100) {
-      const estimatedTotalBytes = bytes / (progress / 100);
-      const remainingBytes = Math.max(0, estimatedTotalBytes - bytes);
-      etaSeconds = remainingBytes / speedBps;
-    } else if (
-      status === 'downloading'
-      && metricsRef.current.etaSeconds != null
-      && now - metricsRef.current.lastEtaAt <= ETA_HOLD_WINDOW_MS
-    ) {
-      etaSeconds = metricsRef.current.etaSeconds;
+    persistedMetricsByJobId.clear();
+    for (const [jobId, metric] of nextMetrics.entries()) {
+      persistedMetricsByJobId.set(jobId, metric);
     }
+    setMetricsByJobId(nextMetrics);
+  }, [mergedQueue]);
 
-    metricsRef.current = {
-      speedBps,
-      etaSeconds,
-      lastEtaAt: etaSeconds != null ? now : metricsRef.current.lastEtaAt,
-    };
-    setActiveMetrics({ speedBps, etaSeconds });
-  }, [activeJob, activeJobId]);
+  const activeMetrics = activeJob
+    ? (metricsByJobId.get(activeJob.id) || buildJobMetrics(activeJob))
+    : { speedBps: 0, etaSeconds: null };
 
-  return { activeJob, activeJobId, activeMetrics };
+  return { activeJob, activeJobId, activeMetrics, setActiveJobId };
 }

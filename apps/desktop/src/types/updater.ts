@@ -1,4 +1,4 @@
-export type UpdaterPhase = 'idle' | 'checking' | 'downloading' | 'downloaded' | 'error';
+export type UpdaterPhase = 'idle' | 'checking' | 'downloading' | 'downloaded' | 'installing' | 'error';
 
 export interface UpdaterState {
   phase: UpdaterPhase;

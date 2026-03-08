@@ -112,9 +112,9 @@ test('electron preload exposes real updater IPC bridge and updates view loads', 
     const window = await electronApp.firstWindow();
     await window.waitForLoadState('domcontentloaded');
 
-    await expect(window.getByRole('heading', { name: 'M3U8 Downloader' })).toBeVisible();
-    await window.getByRole('button', { name: 'Updates' }).click();
-    await expect(window.getByRole('heading', { name: 'Updates' })).toBeVisible();
+    await expect(window.getByAltText('VidSnag')).toBeVisible();
+    await window.getByRole('button', { name: 'Settings' }).click();
+    await expect(window.getByText('Updates', { exact: true })).toBeVisible();
 
     const updaterState = await window.evaluate(async () => {
       if (!window.desktop) return { missingDesktop: true };

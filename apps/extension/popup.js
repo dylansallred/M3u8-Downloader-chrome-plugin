@@ -32,10 +32,10 @@ function showToast(message, variant = 'info', timeoutMs = 2600) {
   if (!toastRegion) return;
 
   const palette = {
-    success: { bg: 'rgba(16, 185, 129, 0.18)', border: 'rgba(16, 185, 129, 0.45)', fg: '#ecfdf5' },
+    success: { bg: 'rgba(182, 60, 8, 0.2)', border: 'rgba(182, 60, 8, 0.5)', fg: '#fff4ef' },
     error: { bg: 'rgba(239, 68, 68, 0.18)', border: 'rgba(239, 68, 68, 0.45)', fg: '#fee2e2' },
-    warning: { bg: 'rgba(245, 158, 11, 0.18)', border: 'rgba(245, 158, 11, 0.45)', fg: '#fffbeb' },
-    info: { bg: 'rgba(59, 130, 246, 0.18)', border: 'rgba(59, 130, 246, 0.45)', fg: '#eff6ff' },
+    warning: { bg: 'rgba(245, 158, 11, 0.2)', border: 'rgba(245, 158, 11, 0.5)', fg: '#fffbeb' },
+    info: { bg: 'rgba(190, 173, 165, 0.18)', border: 'rgba(190, 173, 165, 0.42)', fg: '#f8f3f0' },
   };
   const style = palette[variant] || palette.info;
 
@@ -192,7 +192,7 @@ async function fetchHealth() {
   try {
     const res = await fetch(`${API_BASE}/v1/health`, {
       headers: {
-        'X-Client': 'fetchv-extension',
+        'X-Client': 'vidsnag-extension',
         'X-Protocol-Version': String(EXTENSION_PROTOCOL_VERSION),
       },
     });
@@ -268,6 +268,33 @@ async function getTabMedia(tabId) {
   return response && response.items ? response.items : [];
 }
 
+async function syncActiveTabUrlMedia() {
+  if (!activeTab || !activeTab.id) return;
+
+  try {
+    const latestTab = await chrome.tabs.get(activeTab.id);
+    if (latestTab) {
+      activeTab = latestTab;
+    }
+  } catch {
+    // Keep existing activeTab snapshot if live tab lookup fails.
+  }
+
+  const tabUrl = String(activeTab && activeTab.url || '').trim();
+  if (!tabUrl) return;
+
+  try {
+    await chrome.runtime.sendMessage({
+      cmd: 'SYNC_TAB_URL_MEDIA',
+      tabId: activeTab.id,
+      tabUrl,
+      tabTitle: String(activeTab.title || '').trim(),
+    });
+  } catch {
+    // Ignore sync failures so popup loading still works.
+  }
+}
+
 async function removeTabMediaItem(tabId, itemId) {
   const response = await chrome.runtime.sendMessage({
     cmd: 'REMOVE_TAB_MEDIA',
@@ -285,6 +312,10 @@ function buildJobPayload(item) {
   const titleHints = pickJobTitleHints(inferTitleHints(item, pageTitle, displayTitle));
   const baseTitle = displayTitle || pageTitle || item.filename || 'Download';
   const title = appendEpisodeTagToTitle(baseTitle, titleHints);
+  const youtubeMetadata = item && item.youtubeMetadata && typeof item.youtubeMetadata === 'object'
+    ? item.youtubeMetadata
+    : null;
+  const thumbnailUrl = String(youtubeMetadata && youtubeMetadata.thumbnailUrl || '').trim();
 
   return {
     mediaUrl,
@@ -296,6 +327,8 @@ function buildJobPayload(item) {
     sourcePageTitle: pageTitle || title,
     fallbackMediaUrl: item.fallbackUrl || '',
     titleHints,
+    youtubeMetadata,
+    thumbnailUrl,
     settings: {
       fileNaming: 'title',
       maxSegmentAttempts: 'infinite',
@@ -324,7 +357,7 @@ async function sendJob(item, queueButton = null) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'X-Client': 'fetchv-extension',
+        'X-Client': 'vidsnag-extension',
         'X-Protocol-Version': String(EXTENSION_PROTOCOL_VERSION),
         'X-Extension-Version': String(extensionInfo?.version || ''),
       },
@@ -345,7 +378,7 @@ async function sendJob(item, queueButton = null) {
     showToast(`Queued: ${data.jobId} (position ${data.queuePosition + 1})`, 'success');
   } catch (err) {
     if (!health) {
-      showToast('Desktop app is not reachable. Open M3U8 Downloader desktop app and retry.', 'error', 3600);
+      showToast('Desktop app is not reachable. Open the VidSnag desktop app and retry.', 'error', 3600);
       return;
     }
     const message = err && err.message ? err.message : String(err || 'Unknown error');
@@ -478,6 +511,7 @@ function isLikelyTitleNoise(value, source = '') {
   if (text.length < 2 || text.length > 140) return true;
   if (/^https?:\/\//i.test(raw)) return true;
   if (/^\d+(?:\s+\d+)*$/.test(lower)) return true;
+  if (GENERIC_LOOKUP_TITLE_RE.test(text)) return true;
   if (/^(go back|back|home|menu|close|play|pause|next|previous)$/i.test(lower)) return true;
   if (/^season\s*\d{1,2}(?:\s*episode(?:\s*\d{1,3})?)?$/i.test(lower)) return true;
 
@@ -548,8 +582,20 @@ function pickPreferredContentTitle(item, pageTitle, tvContextFromUrl) {
 }
 
 function getDisplayTitle(item) {
-  // Use stored source page title first so titles stay stable across navigation.
   const pageTitle = String(item.sourcePageTitle || (activeTab && activeTab.title) || '').trim();
+  const youtubeTitle = cleanYoutubeTitleText(item && item.youtubeMetadata && item.youtubeMetadata.title);
+  if (youtubeTitle && !isLikelySiteSlogan(youtubeTitle)) {
+    return youtubeTitle;
+  }
+
+  if (isYoutubePageItem(item)) {
+    const cleanedPageTitle = cleanYoutubeTitleText(pageTitle);
+    if (cleanedPageTitle && !isLikelySiteSlogan(cleanedPageTitle)) {
+      return cleanedPageTitle;
+    }
+  }
+
+  // Use stored source page title first so titles stay stable across navigation.
   const sourcePageUrl = String(item.sourcePageUrl || (activeTab && activeTab.url) || '').trim();
   const tvContextFromUrl = detectTvContextFromUrl(sourcePageUrl);
   const seriesTitleFromPageTitle = tvContextFromUrl ? extractSeriesTitleFromPageTitle(pageTitle) : '';
@@ -618,8 +664,25 @@ function normalizeTitleText(value) {
     .trim();
 }
 
+const GENERIC_LOOKUP_TITLE_RE = /^(index|playlist|master|chunklist|manifest|media|video|stream|subtitle|subtitles|caption|captions|closed captions|cc|audio|audio track|audio tracks|quality|qualities|server|servers|source|sources)$/i;
+
+function cleanYoutubeTitleText(value) {
+  return String(value || '')
+    .replace(/^\(\d+\)\s*/, '')
+    .replace(/^\[\d+\]\s*/, '')
+    .replace(/\s*[-|]\s*youtube\s*$/i, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function isYoutubePageItem(item) {
+  const mediaKind = String(item && item.mediaKind || '').toLowerCase();
+  if (mediaKind === 'youtube-page') return true;
+  return String(item && item.contentType || '').toLowerCase() === 'video/youtube';
+}
+
 function stripTitleNoise(value) {
-  return normalizeTitleText(value)
+  const cleaned = normalizeTitleText(value)
     .replace(/(?:^|[^a-z0-9])s(?:eason)?\s*0*\d{1,2}\s*[-_. ]*e(?:pisode)?\s*0*\d{1,3}(?:[^a-z0-9]|$)/gi, ' ')
     .replace(/(?:^|[^a-z0-9])\d{1,2}\s*x\s*\d{1,3}(?:[^a-z0-9]|$)/gi, ' ')
     .replace(/(?:^|[^a-z0-9])season\s*0*\d{1,2}(?:[^a-z0-9]|$)/gi, ' ')
@@ -627,6 +690,7 @@ function stripTitleNoise(value) {
     .replace(/[()[\]{}]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
+  return GENERIC_LOOKUP_TITLE_RE.test(cleaned) ? '' : cleaned;
 }
 
 function trimDebugText(value, max = 260) {
@@ -796,8 +860,13 @@ function pickPreferredEpisodeHint(currentHint, nextHint) {
 }
 
 function inferTitleHints(item, pageTitle, displayTitle) {
+  const isYoutubePageDetection = isYoutubePageItem(item);
   const sourcePageUrl = String(item && item.sourcePageUrl || (activeTab && activeTab.url) || '').trim();
-  const sourceUrlHint = inferHintFromSourcePageUrl(sourcePageUrl);
+  const sourceUrlHint = isYoutubePageDetection ? null : inferHintFromSourcePageUrl(sourcePageUrl);
+  const tvContextFromUrl = detectTvContextFromUrl(sourcePageUrl);
+  const preferredContentTitle = isYoutubePageDetection
+    ? ''
+    : pickPreferredContentTitle(item, pageTitle, tvContextFromUrl);
   const decodedFilename = decodeFilenameCandidate(item && item.filename);
   const pageCandidates = Array.isArray(item && item.pageTitleCandidates)
     ? item.pageTitleCandidates
@@ -805,12 +874,37 @@ function inferTitleHints(item, pageTitle, displayTitle) {
       .map((entry, index) => ({
         field: `pageCandidate.${index}`,
         label: `Page Candidate (${String(entry.source || 'unknown')})`,
+        source: String(entry.source || '').trim().toLowerCase(),
         value: String(entry.value || '').trim(),
       }))
       .filter((entry) => entry.value)
     : [];
 
-  const resourceSignalCandidates = Array.isArray(item && item.resourceSignals)
+  const selectedPageCandidates = isYoutubePageDetection
+    ? pageCandidates.filter((entry) => {
+      const source = String(entry.source || '').trim();
+      return source === 'youtube.title'
+        || source === 'youtube.channel'
+        || source === 'youtube.dom.title'
+        || source === 'youtube.dom.channel'
+        || source === 'document.title'
+        || source.startsWith('meta[');
+    })
+    : pageCandidates;
+
+  const youtubeMetadata = item && item.youtubeMetadata && typeof item.youtubeMetadata === 'object'
+    ? item.youtubeMetadata
+    : null;
+  const youtubeCandidates = youtubeMetadata
+    ? [
+      { field: 'youtube.title', label: 'YouTube Title', value: cleanYoutubeTitleText(String(youtubeMetadata.title || '').trim()) },
+      { field: 'youtube.channel', label: 'YouTube Channel', value: String(youtubeMetadata.channelName || '').trim() },
+    ].filter((entry) => entry.value)
+    : [];
+
+  const resourceSignalCandidates = isYoutubePageDetection
+    ? []
+    : Array.isArray(item && item.resourceSignals)
     ? item.resourceSignals
       .filter((entry) => entry && typeof entry === 'object')
       .flatMap((entry, index) => {
@@ -852,12 +946,47 @@ function inferTitleHints(item, pageTitle, displayTitle) {
   const candidates = [
     { field: 'displayTitle', label: 'Display Title', value: displayTitle },
     { field: 'pageTitle', label: 'Page Title', value: pageTitle },
-    ...pageCandidates,
+    ...youtubeCandidates,
+    ...selectedPageCandidates,
     ...resourceSignalCandidates,
     { field: 'filename', label: 'Filename', value: item && item.filename },
     { field: 'filenameDecoded', label: 'Decoded Filename', value: decodedFilename },
     { field: 'url', label: 'Request URL', value: item && item.url },
   ].filter((candidate) => String(candidate.value || '').trim());
+
+  if (isYoutubePageDetection) {
+    const lookupTitle = [
+      cleanYoutubeTitleText((youtubeMetadata && youtubeMetadata.title) || ''),
+      cleanYoutubeTitleText(displayTitle),
+      cleanYoutubeTitleText(pageTitle),
+      item && item.filename,
+    ]
+      .map((candidate) => stripTitleNoise(candidate))
+      .find(Boolean) || '';
+    const candidateTitles = candidates.map((candidate) => ({
+      field: candidate.field,
+      label: candidate.label,
+      value: trimDebugText(candidate.value),
+      normalized: trimDebugText(normalizeTitleText(candidate.value)),
+      lookupCandidate: trimDebugText(stripTitleNoise(candidate.value)),
+      matchedPattern: null,
+      seasonNumber: null,
+      episodeNumber: null,
+    }));
+
+    return {
+      lookupTitle,
+      seasonNumber: null,
+      episodeNumber: null,
+      isTvCandidate: false,
+      matchedPattern: null,
+      matchedField: null,
+      mediaGuess: lookupTitle ? 'movie_or_unknown' : 'unknown',
+      candidateTitles,
+      tvContextFromUrl: false,
+      pageIsTvContext: false,
+    };
+  }
 
   const pageEpisodeHint = item && item.pageEpisodeHint && typeof item.pageEpisodeHint === 'object'
     ? item.pageEpisodeHint
@@ -933,11 +1062,14 @@ function inferTitleHints(item, pageTitle, displayTitle) {
     ? String(candidates.find((candidate) => candidate.field === matched.matchedField)?.value || '').trim()
     : '';
   const matchedLookup = stripTitleNoise(matchedSource);
-  const source = matchedLookup
-    ? matchedSource
-    : (displayTitle || pageTitle || (item && item.filename) || '');
-  const lookupTitle = stripTitleNoise(source);
-  const tvContextFromUrl = detectTvContextFromUrl(sourcePageUrl);
+  const lookupTitle = matchedLookup || [
+    preferredContentTitle,
+    pageTitle,
+    displayTitle,
+    item && item.filename,
+  ]
+    .map((candidate) => stripTitleNoise(candidate))
+    .find(Boolean) || '';
   const pageIsTvContext = Boolean(item && item.pageIsTvContext);
   const hasEpisodeSignal = Boolean(
     matched
@@ -1065,6 +1197,7 @@ function buildDebugPayload(item, pageTitle, displayTitle, titleHints, resolution
       displayTitle: displayTitle || null,
       filename: item.filename || null,
       url: item.url || null,
+      youtubeMetadata: item.youtubeMetadata || null,
       pageEpisodeHint: item.pageEpisodeHint || null,
       resourceSignals: Array.isArray(item.resourceSignals) ? item.resourceSignals : [],
     },
@@ -1086,6 +1219,7 @@ function formatContentType(contentType) {
   if (!contentType) return null;
   const ct = contentType.split(';')[0].trim();
   const friendly = {
+    'video/youtube': 'YouTube Page',
     'application/x-mpegurl': 'HLS Playlist',
     'application/vnd.apple.mpegurl': 'HLS Playlist',
     'application/dash+xml': 'DASH Manifest',
@@ -1150,11 +1284,14 @@ function renderMedia(items) {
 
     const typePill = document.createElement('span');
     typePill.className = 'pill pill-accent';
-    typePill.textContent = (item.type || 'file').toUpperCase();
+    const isYoutubePageDetection = String(item.mediaKind || '').toLowerCase() === 'youtube-page';
+    typePill.textContent = isYoutubePageDetection
+      ? 'YT'
+      : (item.type || 'file').toUpperCase();
     pillGroup.appendChild(typePill);
 
     const episodeTag = formatEpisodeTag(titleHints.seasonNumber, titleHints.episodeNumber);
-    if (episodeTag || titleHints.isTvCandidate) {
+    if (!isYoutubePageDetection && (episodeTag || titleHints.isTvCandidate)) {
       const tvPill = document.createElement('span');
       tvPill.className = 'pill pill-muted';
       tvPill.textContent = episodeTag || 'TV';
@@ -1181,6 +1318,14 @@ function renderMedia(items) {
       const typeEl = document.createElement('span');
       typeEl.textContent = friendlyType;
       infoRow.appendChild(typeEl);
+    }
+
+    const youtubeChannel = String(item && item.youtubeMetadata && item.youtubeMetadata.channelName || '').trim();
+    if (youtubeChannel) {
+      if (hostname || friendlyType) infoRow.appendChild(makeDot());
+      const channelEl = document.createElement('span');
+      channelEl.textContent = `Channel: ${youtubeChannel}`;
+      infoRow.appendChild(channelEl);
     }
 
     if (titleHints.lookupTitle && normalizeTitleText(titleHints.lookupTitle) !== normalizeTitleText(displayTitle)) {
@@ -1292,8 +1437,11 @@ function renderMedia(items) {
     streamBtn.innerHTML = '<svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><polygon points="6 4 20 12 6 20 6 4"/></svg>';
     streamBtn.title = 'Open stream player';
     streamBtn.setAttribute('aria-label', 'Open stream player');
-    if (!buildStreamPlayerUrl(item)) {
+    if (!buildStreamPlayerUrl(item) || isYoutubePageDetection) {
       streamBtn.disabled = true;
+      if (isYoutubePageDetection) {
+        streamBtn.title = 'Stream player is unavailable for YouTube page detections';
+      }
     }
     streamBtn.addEventListener('click', () => streamMedia(item, streamBtn));
 
@@ -1373,6 +1521,7 @@ function renderMedia(items) {
 
 async function refreshMedia() {
   if (!activeTab) return;
+  await syncActiveTabUrlMedia();
   const items = await getTabMedia(activeTab.id);
   renderMedia(items);
 }
@@ -1385,7 +1534,7 @@ async function refreshConnection() {
     if (compatibilityIssue) {
       applyCompatibilityUi();
     } else {
-      setStatus(`Desktop connected (${data.appVersion})`);
+      setStatus(`App connected (${data.appVersion})`);
     }
   } catch (err) {
     compatibilityIssue = null;

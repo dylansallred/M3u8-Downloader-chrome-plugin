@@ -73,9 +73,19 @@ class QueueManager {
         if (!queuedJob.storageDir && queuedJob.filePath) {
           queuedJob.storageDir = path.dirname(queuedJob.filePath);
         }
-        if (queuedJob.queueStatus === 'downloading') {
-          // Reset downloading jobs to queued on server restart
+        if (
+          queuedJob.queueStatus === 'downloading'
+          || queuedJob.status === 'downloading'
+          || queuedJob.status === 'fetching-playlist'
+        ) {
+          // Reset in-flight jobs to queued/pending on server restart so they can be started again.
           queuedJob.queueStatus = 'queued';
+          queuedJob.status = 'pending';
+          queuedJob.pauseRequested = false;
+          queuedJob.resumeRequested = false;
+          queuedJob.cancelled = false;
+          queuedJob.speedBps = 0;
+          queuedJob.etaSeconds = null;
         }
         // Restore job to jobs Map if not already there
         if (!this.jobs.has(queuedJob.id)) {
@@ -84,6 +94,7 @@ class QueueManager {
       });
 
       this.pruneQueueForPersistence();
+      await this.cleanupOrphanTempDirectories();
 
       logger.info('Loaded jobs from queue file', { count: this.queue.length });
 
@@ -93,6 +104,66 @@ class QueueManager {
     } catch (err) {
       logger.warn('Failed to load queue from disk', { error: err.message });
       this.queue = [];
+    }
+  }
+
+  extractJobIdFromTempDirName(name) {
+    const value = String(name || '').trim();
+    if (!value) return '';
+    const modern = value.match(/-([a-z0-9]+-[a-z0-9]+)$/i);
+    if (modern && modern[1]) return modern[1];
+    const legacy = value.match(/-([a-z0-9]+)$/i);
+    if (legacy && legacy[1]) return legacy[1];
+    return '';
+  }
+
+  async cleanupOrphanTempDirectories() {
+    const keepJobIds = new Set(
+      (this.queue || [])
+        .filter(Boolean)
+        .filter((job) => {
+          const status = String(job.queueStatus || job.status || '');
+          return status === 'queued'
+            || status === 'paused'
+            || status === 'downloading'
+            || status === 'fetching-playlist';
+        })
+        .map((job) => String(job.id || '').trim())
+        .filter(Boolean),
+    );
+
+    let removedCount = 0;
+    try {
+      const entries = await this.fsPromises.readdir(this.downloadDir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (!entry || !entry.isDirectory() || !entry.name.startsWith('temp-')) continue;
+
+        const entryPath = path.join(this.downloadDir, entry.name);
+        const linkedJobId = this.extractJobIdFromTempDirName(entry.name);
+        const shouldKeep = linkedJobId
+          ? keepJobIds.has(linkedJobId)
+          : keepJobIds.size > 0;
+        if (shouldKeep) continue;
+
+        try {
+          await this.fsPromises.rm(entryPath, { recursive: true, force: true });
+          removedCount += 1;
+        } catch (err) {
+          logger.warn('Failed to remove orphan temp directory', {
+            tempDir: entry.name,
+            error: err && err.message,
+          });
+        }
+      }
+    } catch (err) {
+      logger.warn('Failed to enumerate temp directories for orphan cleanup', {
+        error: err && err.message,
+      });
+      return;
+    }
+
+    if (removedCount > 0) {
+      logger.info('Removed orphan temp directories', { removedCount });
     }
   }
 
@@ -113,9 +184,12 @@ class QueueManager {
           downloadName,
           downloadNameMp4,
           bytesDownloaded,
+          totalBytes,
           totalSegments,
           completedSegments,
           progress,
+          speedBps,
+          etaSeconds,
           status,
           queueStatus,
           queuePosition,
@@ -145,9 +219,12 @@ class QueueManager {
           downloadName,
           downloadNameMp4,
           bytesDownloaded,
+          totalBytes,
           totalSegments,
           completedSegments,
           progress,
+          speedBps,
+          etaSeconds,
           status,
           queueStatus,
           queuePosition,
@@ -182,6 +259,7 @@ class QueueManager {
           originalHlsDownloadNameMp4: job.originalHlsDownloadNameMp4,
           fallbackAttempted: !!job.fallbackAttempted,
           fallbackUsed: !!job.fallbackUsed,
+          youtubeMetadata: job.youtubeMetadata || null,
         };
       });
 
@@ -228,8 +306,11 @@ class QueueManager {
       progress: job.progress || 0,
       status: job.status || 'pending',
       bytesDownloaded: job.bytesDownloaded || 0,
+      totalBytes: Number(job.totalBytes || 0) || 0,
       totalSegments: job.totalSegments || 0,
       completedSegments: job.completedSegments || 0,
+      speedBps: Number(job.speedBps || 0) || 0,
+      etaSeconds: Number.isFinite(job.etaSeconds) ? Number(job.etaSeconds) : null,
       failedSegments: Array.isArray(job.failedSegments) ? job.failedSegments.length : 0,
       queuedAt: job.queuedAt,
       startedAt: job.startedAt,
@@ -243,6 +324,7 @@ class QueueManager {
       tmdbTitle: job.tmdbTitle,
       tmdbReleaseDate: job.tmdbReleaseDate,
       tmdbMetadata: job.tmdbMetadata || null,
+      youtubeMetadata: job.youtubeMetadata || null,
     }));
   }
 
@@ -493,8 +575,13 @@ class QueueManager {
       this.activeJobs.delete(jobId);
     }
 
-    // Delete files if requested
-    if (deleteFiles) {
+    const isActiveDownload = job.queueStatus === 'downloading'
+      || job.status === 'downloading'
+      || job.status === 'fetching-playlist';
+    const deleteTransientOnly = !deleteFiles;
+
+    // Delete files if requested; otherwise still remove transient artifacts for removed jobs.
+    if (deleteFiles || !isActiveDownload) {
       try {
         job.cleanupOnCancel = true;
         const filesToDelete = new Set();
@@ -504,11 +591,17 @@ class QueueManager {
           }
         };
 
-        addFile(job.filePath);
-        addFile(job.mp4Path);
-        addFile(job.thumbnailPath);
-        addFile(job.subtitlePath);
-        addFile(job.subtitleZipPath);
+        if (!deleteTransientOnly) {
+          addFile(job.filePath);
+          addFile(job.mp4Path);
+          addFile(job.thumbnailPath);
+          addFile(job.subtitlePath);
+          addFile(job.subtitleZipPath);
+
+          if (Array.isArray(job.thumbnailPaths)) {
+            job.thumbnailPaths.forEach((thumbPath) => addFile(thumbPath));
+          }
+        }
 
         if (job.filePath) {
           addFile(`${job.filePath}.part`);
@@ -517,16 +610,18 @@ class QueueManager {
           addFile(`${job.mp4Path}.part`);
         }
 
-        if (Array.isArray(job.thumbnailPaths)) {
-          job.thumbnailPaths.forEach((thumbPath) => addFile(thumbPath));
-        }
-
-        if (job.id && job.filePath) {
-          const downloadDir = path.dirname(job.filePath);
-          addFile(path.join(downloadDir, `${job.id}-thumb.jpg`));
-          addFile(path.join(downloadDir, `${job.id}-subtitles.srt`));
-          addFile(path.join(downloadDir, `${job.id}-subtitles.zip`));
-          addFile(path.join(downloadDir, `ts-parts-${job.id}.txt`));
+        if (job.id) {
+          const referenceDir = job.filePath
+            ? path.dirname(job.filePath)
+            : (typeof job.storageDir === 'string' ? job.storageDir : null);
+          if (referenceDir) {
+            addFile(path.join(referenceDir, `ts-parts-${job.id}.txt`));
+            if (!deleteTransientOnly) {
+              addFile(path.join(referenceDir, `${job.id}-thumb.jpg`));
+              addFile(path.join(referenceDir, `${job.id}-subtitles.srt`));
+              addFile(path.join(referenceDir, `${job.id}-subtitles.zip`));
+            }
+          }
         }
 
         filesToDelete.forEach((filePath) => {
@@ -551,7 +646,29 @@ class QueueManager {
           && path.resolve(path.dirname(jobStorageDir)) === path.resolve(this.downloadDir)
           && path.basename(jobStorageDir) === String(job.id || '')
         ) {
-          fs.rmSync(jobStorageDir, { recursive: true, force: true });
+          if (deleteTransientOnly) {
+            try {
+              const storageEntries = fs.readdirSync(jobStorageDir, { withFileTypes: true });
+              storageEntries
+                .filter((entry) => entry.isFile())
+                .map((entry) => entry.name)
+                .filter((name) => name.endsWith('.part') || name.endsWith('.tmp') || /^ts-parts-.*[.]txt$/i.test(name))
+                .forEach((name) => {
+                  const target = path.join(jobStorageDir, name);
+                  if (fs.existsSync(target)) {
+                    fs.unlinkSync(target);
+                  }
+                });
+              const remaining = fs.readdirSync(jobStorageDir);
+              if (remaining.length === 0) {
+                fs.rmdirSync(jobStorageDir);
+              }
+            } catch (err) {
+              console.warn(`Failed to prune transient files in storage dir for job ${jobId}:`, err.message);
+            }
+          } else {
+            fs.rmSync(jobStorageDir, { recursive: true, force: true });
+          }
         }
 
         if (job.id) {
@@ -560,7 +677,8 @@ class QueueManager {
             const entries = fs.readdirSync(queueDir, { withFileTypes: true });
             entries
               .filter((entry) => entry.isDirectory())
-              .filter((entry) => entry.name.startsWith('temp-') && entry.name.endsWith(`-${job.id}`))
+              .filter((entry) => entry.name.startsWith('temp-'))
+              .filter((entry) => this.extractJobIdFromTempDirName(entry.name) === String(job.id))
               .forEach((entry) => {
                 const tempPath = path.join(queueDir, entry.name);
                 fs.rmSync(tempPath, { recursive: true, force: true });
@@ -568,7 +686,7 @@ class QueueManager {
           }
         }
       } catch (err) {
-        console.warn(`Failed to delete files for job ${jobId}:`, err.message);
+        console.warn(`Failed to cleanup files for job ${jobId}:`, err.message);
       }
     }
 

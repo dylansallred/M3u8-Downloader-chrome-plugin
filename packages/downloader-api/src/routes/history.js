@@ -24,6 +24,7 @@ const HISTORY_STREAM_CONTENT_TYPES = {
 };
 
 const PROTECTED_TOP_LEVEL_FILES = new Set(['queue.json', 'history-index.json']);
+const TERMINAL_JOB_STATUSES = new Set(['completed', 'completed-with-errors', 'failed', 'cancelled']);
 
 function isHistoryMediaFileName(fileName) {
   return HISTORY_MEDIA_EXTENSIONS.has(path.extname(String(fileName || '')).toLowerCase());
@@ -152,6 +153,32 @@ function collectActiveJobIds(historyIndex) {
   return activeJobIds;
 }
 
+function collectActiveJobIdsFromJobsMap(historyIndex) {
+  const activeJobIds = new Set();
+  if (!historyIndex || !historyIndex.jobs || typeof historyIndex.jobs.values !== 'function') {
+    return activeJobIds;
+  }
+
+  for (const job of historyIndex.jobs.values()) {
+    if (!job || !job.id) continue;
+    const status = String(job.queueStatus || job.status || '').trim().toLowerCase();
+    if (!status || TERMINAL_JOB_STATUSES.has(status)) continue;
+    activeJobIds.add(String(job.id));
+  }
+
+  return activeJobIds;
+}
+
+function extractTrailingJobIdFromTempDirName(name) {
+  const value = String(name || '').trim();
+  if (!value) return '';
+  const modern = value.match(/-([a-z0-9]+-[a-z0-9]+)$/i);
+  if (modern && modern[1]) return modern[1];
+  const legacy = value.match(/-([a-z0-9]+)$/i);
+  if (legacy && legacy[1]) return legacy[1];
+  return '';
+}
+
 async function resolveHistoryFilePath(fsPromises, historyIndex, downloadDir, safeName) {
   if (!safeName) return null;
 
@@ -236,6 +263,70 @@ async function deleteTempDirectoriesForJobIds(fsPromises, downloadDir, jobIds) {
   return removedCount;
 }
 
+async function deleteOrphanTempDirectories(fsPromises, downloadDir, activeJobIds) {
+  let removedCount = 0;
+  try {
+    const entries = await fsPromises.readdir(downloadDir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry.isDirectory() || !entry.name.startsWith('temp-')) continue;
+      const linkedJobId = extractTrailingJobIdFromTempDirName(entry.name);
+      const shouldKeep = linkedJobId
+        ? activeJobIds.has(linkedJobId)
+        : activeJobIds.size > 0;
+      if (shouldKeep) continue;
+
+      const fullPath = path.join(downloadDir, entry.name);
+      try {
+        await fsPromises.rm(fullPath, { recursive: true, force: true });
+        removedCount += 1;
+      } catch (err) {
+        logger.warn('Failed to delete orphan temp directory during history cleanup', {
+          directory: entry.name,
+          error: err.message,
+        });
+      }
+    }
+  } catch (err) {
+    logger.warn('Failed to enumerate temp directories during history cleanup', { error: err.message });
+  }
+
+  return removedCount;
+}
+
+function isJobStorageDirectoryName(name) {
+  const value = String(name || '').trim();
+  if (!value) return false;
+  return /^[a-z0-9]+-[a-z0-9]+$/i.test(value);
+}
+
+async function deleteInactiveJobDirectories(fsPromises, downloadDir, activeJobIds) {
+  let removedCount = 0;
+  try {
+    const entries = await fsPromises.readdir(downloadDir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      if (entry.name.startsWith('temp-')) continue;
+      if (!isJobStorageDirectoryName(entry.name)) continue;
+      if (activeJobIds.has(entry.name)) continue;
+
+      const fullPath = path.join(downloadDir, entry.name);
+      try {
+        await fsPromises.rm(fullPath, { recursive: true, force: true });
+        removedCount += 1;
+      } catch (err) {
+        logger.warn('Failed to delete inactive job storage directory during history cleanup', {
+          directory: entry.name,
+          error: err.message,
+        });
+      }
+    }
+  } catch (err) {
+    logger.warn('Failed to enumerate inactive job storage directories', { error: err.message });
+  }
+
+  return removedCount;
+}
+
 async function registerHistoryRoutes(app, historyIndex, fsPromises, downloadDir) {
   if (!historyIndex) {
     throw new Error('registerHistoryRoutes requires historyIndex');
@@ -261,7 +352,10 @@ async function registerHistoryRoutes(app, historyIndex, fsPromises, downloadDir)
 
   app.delete('/api/history', async (req, res) => {
     try {
-      const activeJobIds = collectActiveJobIds(historyIndex);
+      const activeJobIds = new Set([
+        ...collectActiveJobIds(historyIndex),
+        ...collectActiveJobIdsFromJobsMap(historyIndex),
+      ]);
       const { files } = await walkDownloadEntries(fsPromises, downloadDir);
 
       const filePathsToDelete = files
@@ -285,6 +379,8 @@ async function registerHistoryRoutes(app, historyIndex, fsPromises, downloadDir)
           .filter(Boolean)
       );
       await deleteTempDirectoriesForJobIds(fsPromises, downloadDir, deletedJobIds);
+      const orphanTempRemoved = await deleteOrphanTempDirectories(fsPromises, downloadDir, activeJobIds);
+      const inactiveJobDirsRemoved = await deleteInactiveJobDirectories(fsPromises, downloadDir, activeJobIds);
       await removeEmptyDirectories(fsPromises, downloadDir);
 
       if (typeof historyIndex.refreshFromDisk === 'function') {
@@ -294,6 +390,8 @@ async function registerHistoryRoutes(app, historyIndex, fsPromises, downloadDir)
       logger.info('History cleared', {
         filesDeleted: deleted.length,
         jobIdsAffected: deletedJobIds.size,
+        orphanTempRemoved,
+        inactiveJobDirsRemoved,
       });
       res.json({ ok: true });
     } catch (err) {
@@ -404,6 +502,10 @@ async function registerHistoryRoutes(app, historyIndex, fsPromises, downloadDir)
     }
 
     try {
+      const activeJobIds = new Set([
+        ...collectActiveJobIds(historyIndex),
+        ...collectActiveJobIdsFromJobsMap(historyIndex),
+      ]);
       const jobId = extractJobIdFromArtifactName(safeName);
       const fileDir = path.dirname(fullPath);
       const isNestedJobDir = (
@@ -424,8 +526,8 @@ async function registerHistoryRoutes(app, historyIndex, fsPromises, downloadDir)
 
         try {
           const remaining = await fsPromises.readdir(fileDir);
-          if (remaining.length === 0) {
-            await fsPromises.rmdir(fileDir);
+          if (remaining.length === 0 || (jobId && !activeJobIds.has(jobId))) {
+            await fsPromises.rm(fileDir, { recursive: true, force: true });
           }
         } catch (err) {
           if (err && err.code !== 'ENOENT') {
@@ -449,6 +551,7 @@ async function registerHistoryRoutes(app, historyIndex, fsPromises, downloadDir)
           .filter(Boolean)
       );
       await deleteTempDirectoriesForJobIds(fsPromises, downloadDir, deletedJobIds);
+      await deleteOrphanTempDirectories(fsPromises, downloadDir, activeJobIds);
       await removeEmptyDirectories(fsPromises, downloadDir);
 
       if (typeof historyIndex.refreshFromDisk === 'function') {

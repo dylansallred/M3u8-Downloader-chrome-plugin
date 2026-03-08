@@ -21,6 +21,7 @@ export function UpdaterCard({ updater }: UpdaterCardProps) {
     checking: 'bg-status-queued/15 text-status-queued',
     downloading: 'bg-status-downloading/15 text-status-downloading',
     downloaded: 'bg-primary/15 text-primary',
+    installing: 'bg-status-downloading/15 text-status-downloading',
     error: 'bg-destructive/15 text-destructive',
   };
 

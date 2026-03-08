@@ -1,6 +1,12 @@
 node_modules/
 apps/desktop/dist/
 apps/desktop/dist-electron/
+apps/desktop/bin/yt-dlp
+apps/desktop/bin/yt-dlp.exe
+apps/desktop/bin/ffmpeg
+apps/desktop/bin/ffmpeg.exe
+apps/desktop/bin/ffprobe
+apps/desktop/bin/ffprobe.exe
 packages/downloader-api/logs/
 packages/downloader-engine/logs/
 .vite/

@@ -1,7 +1,7 @@
-import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { AlertTriangle, ArrowDownToLine } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import logoTitle from '@/assets/vidsnag-logo-title.png';
 
 type View = 'queue' | 'history' | 'settings';
 
@@ -22,9 +22,11 @@ interface NavbarProps {
 export function Navbar({ currentView, onViewChange, status, compatibilityWarning, hasUpdate }: NavbarProps) {
   return (
     <header className="drag-region h-12 border-b border-border flex items-center px-4 gap-4 shrink-0">
-      <span className="no-drag text-sm font-semibold text-foreground tracking-tight select-none">
-        FetchV
-      </span>
+      <img
+        src={logoTitle}
+        alt="VidSnag"
+        className="no-drag h-6 w-auto max-w-[170px] object-contain select-none"
+      />
 
       <nav className="no-drag flex items-center gap-0.5 ml-2">
         {TABS.map((tab) => (

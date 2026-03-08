@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const { spawn, spawnSync } = require('child_process');
 const { getClient, fetchText, parseM3U8 } = require('./PlaylistUtils');
 const { getRetryBackoffMs, downloadSegment } = require('./SegmentDownloader');
 const { remuxAndGenerateThumbnails } = require('./VideoConverter');
@@ -16,9 +17,512 @@ function createJobProcessor({
 }) {
   const MAX_TS_PART_BYTES = 512 * 1024 * 1024; // ~512 MiB per TS part
   const DIRECT_MAX_ATTEMPTS = 4;
+  const YT_DLP_PATH = String(process.env.YTDLP_PATH || process.env.YT_DLP_PATH || 'yt-dlp').trim() || 'yt-dlp';
+  let ytDlpAvailable = null;
+  const isExplicitYtDlpPath = /[\\/]/.test(YT_DLP_PATH);
 
   function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  function isYouTubeUrl(value) {
+    if (typeof value !== 'string' || !value.trim()) return false;
+    try {
+      const parsed = new URL(value.trim());
+      const host = String(parsed.hostname || '').toLowerCase();
+      return host === 'youtube.com'
+        || host.endsWith('.youtube.com')
+        || host === 'youtu.be'
+        || host.endsWith('.youtu.be');
+    } catch {
+      return false;
+    }
+  }
+
+  function hasYtDlp() {
+    if (typeof ytDlpAvailable === 'boolean') {
+      return ytDlpAvailable;
+    }
+
+    try {
+      const probe = spawnSync(YT_DLP_PATH, ['--version'], {
+        stdio: 'ignore',
+        timeout: 5000,
+      });
+      if (probe.status === 0) {
+        ytDlpAvailable = true;
+      } else if (probe.error && probe.error.code === 'ETIMEDOUT' && isExplicitYtDlpPath && fs.existsSync(YT_DLP_PATH)) {
+        // Keep parity with API startup detection: trust explicit/bundled binary path on probe timeout.
+        ytDlpAvailable = true;
+        logger.info('yt-dlp probe timed out; using configured path', { ytDlpPath: YT_DLP_PATH });
+      } else {
+        ytDlpAvailable = false;
+      }
+    } catch {
+      ytDlpAvailable = isExplicitYtDlpPath && fs.existsSync(YT_DLP_PATH);
+    }
+
+    if (!ytDlpAvailable) {
+      logger.warn('yt-dlp not detected; YouTube URLs cannot be downloaded', {
+        ytDlpPath: YT_DLP_PATH,
+      });
+    }
+
+    return ytDlpAvailable;
+  }
+
+  async function findLatestJobAsset(storageDir, jobId) {
+    if (!storageDir || !jobId) return '';
+    try {
+      const entries = await fsPromises.readdir(storageDir, { withFileTypes: true });
+      const files = entries
+        .filter((entry) => entry && entry.isFile && entry.isFile())
+        .map((entry) => entry.name)
+        .filter((name) => name.startsWith(`${jobId}-`) && !name.endsWith('.part'));
+      if (files.length === 0) return '';
+
+      const withStats = await Promise.all(
+        files.map(async (name) => {
+          const fullPath = path.join(storageDir, name);
+          const stats = await fsPromises.stat(fullPath);
+          return {
+            fullPath,
+            mtimeMs: Number(stats && stats.mtimeMs || 0),
+            size: Number(stats && stats.size || 0),
+          };
+        })
+      );
+
+      withStats.sort((a, b) => {
+        if (b.mtimeMs !== a.mtimeMs) return b.mtimeMs - a.mtimeMs;
+        return b.size - a.size;
+      });
+      return withStats[0] ? withStats[0].fullPath : '';
+    } catch {
+      return '';
+    }
+  }
+
+  async function resolveAccessibleOutputPath(candidatePath, storageDir, jobId) {
+    const raw = String(candidatePath || '').trim();
+    if (raw) {
+      const fullPath = path.isAbsolute(raw) ? raw : path.resolve(storageDir, raw);
+      try {
+        await fsPromises.access(fullPath);
+        return fullPath;
+      } catch {
+        // Fall back to scanning known outputs if reported path is stale/missing.
+      }
+    }
+
+    const latest = await findLatestJobAsset(storageDir, jobId);
+    if (!latest) return '';
+    try {
+      await fsPromises.access(latest);
+      return latest;
+    } catch {
+      return '';
+    }
+  }
+
+  async function runYouTubeDirectJob(job) {
+    if (!job || !job.url) {
+      throw new Error('Missing job URL for yt-dlp download');
+    }
+    if (!hasYtDlp()) {
+      throw new Error('yt-dlp is not installed. Install yt-dlp, restart the desktop app, and retry.');
+    }
+
+    if (!job.storageDir && job.filePath) {
+      job.storageDir = path.dirname(job.filePath);
+    }
+    const storageDir = job.storageDir || (job.filePath ? path.dirname(job.filePath) : downloadDir);
+    await fsPromises.mkdir(storageDir, { recursive: true });
+    job.storageDir = storageDir;
+
+    const outputTemplate = path.join(storageDir, `${job.id}-%(title).120B.%(ext)s`);
+    let ffmpegLocation = '';
+    if (typeof FFMPEG_PATH === 'string' && FFMPEG_PATH.trim()) {
+      const normalizedFfmpegPath = FFMPEG_PATH.trim();
+      try {
+        if (fs.existsSync(normalizedFfmpegPath)) {
+          const stats = fs.statSync(normalizedFfmpegPath);
+          ffmpegLocation = stats.isDirectory()
+            ? normalizedFfmpegPath
+            : path.dirname(normalizedFfmpegPath);
+        }
+      } catch {
+        ffmpegLocation = '';
+      }
+    }
+
+    const args = [
+      '--ignore-config',
+      '--no-playlist',
+      '--no-part',
+      '--no-keep-video',
+      '--progress',
+      '--no-quiet',
+      '--newline',
+      '--no-mtime',
+      '--restrict-filenames',
+      '--merge-output-format',
+      'mp4',
+      '--remux-video',
+      'mp4',
+      '-f',
+      // Prefer MP4-compatible streams first to avoid split mp4(video)+webm(audio) outputs.
+      'bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/bv*+ba/b',
+      '--progress-template',
+      'download:bytes=%(progress.downloaded_bytes)s,total=%(progress.total_bytes)s,total_estimate=%(progress.total_bytes_estimate)s,speed=%(progress.speed)s,eta=%(progress.eta)s',
+      '--print',
+      'after_move:filepath=%(filepath)s',
+      '-o',
+      outputTemplate,
+      job.url,
+    ];
+
+    if (ffmpegLocation) {
+      args.push('--ffmpeg-location', ffmpegLocation);
+    }
+
+    const rawHeaders = job.headers && typeof job.headers === 'object' ? job.headers : {};
+    for (const [rawKey, rawValue] of Object.entries(rawHeaders)) {
+      const key = String(rawKey || '').trim();
+      const value = String(rawValue || '').trim();
+      if (!key || !value) continue;
+      if (key.includes('\n') || value.includes('\n')) continue;
+      args.push('--add-header', `${key}: ${value}`);
+    }
+
+    let resolvedPath = '';
+    let lastErrorLine = '';
+    let totalDownloadPhases = 1;
+    let currentDownloadPhaseIndex = 0;
+    let currentPhaseProgress = 0;
+    let destinationLineCount = 0;
+    const ytDebugEnabled = String(process.env.DEBUG_YTDLP_PROGRESS || '').trim() === '1';
+    let ytDebugLineCount = 0;
+    logger.info('yt-dlp debug mode', {
+      jobId: job && job.id,
+      enabled: ytDebugEnabled,
+      envValue: String(process.env.DEBUG_YTDLP_PROGRESS || ''),
+    });
+    const parseMetricNumber = (raw) => {
+      const text = String(raw || '').trim();
+      if (!text || text.toLowerCase() === 'na' || text.toLowerCase() === 'none') return 0;
+      const normalized = text.replace(/,/g, '');
+      const value = Number(normalized);
+      return Number.isFinite(value) && value >= 0 ? value : 0;
+    };
+    const parseByteMetric = (raw) => {
+      const text = String(raw || '').trim();
+      if (!text) return 0;
+
+      const numeric = parseMetricNumber(text);
+      if (numeric > 0) return numeric;
+
+      const normalized = text
+        .replace(/\/s$/i, '')
+        .replace(/\s+/g, '')
+        .trim();
+      const match = normalized.match(/^([0-9]+(?:\.[0-9]+)?)([kmgtp]?i?b)$/i);
+      if (!match) return 0;
+
+      const value = Number(match[1]);
+      if (!Number.isFinite(value) || value < 0) return 0;
+      const unit = String(match[2] || 'b').toLowerCase();
+      const multiplier = {
+        b: 1,
+        kb: 1_000,
+        mb: 1_000_000,
+        gb: 1_000_000_000,
+        tb: 1_000_000_000_000,
+        pb: 1_000_000_000_000_000,
+        kib: 1_024,
+        mib: 1_048_576,
+        gib: 1_073_741_824,
+        tib: 1_099_511_627_776,
+        pib: 1_125_899_906_842_624,
+      }[unit] || 0;
+      if (!multiplier) return 0;
+      return Math.max(0, Math.floor(value * multiplier));
+    };
+    const parseEtaSeconds = (raw) => {
+      const text = String(raw || '').trim();
+      if (!text || /^na$/i.test(text) || /^none$/i.test(text)) return 0;
+
+      const numeric = parseMetricNumber(text);
+      if (numeric > 0) return Math.floor(numeric);
+
+      if (/^\d{1,2}:\d{2}(?::\d{2})?$/.test(text)) {
+        const parts = text.split(':').map((part) => Number.parseInt(part, 10));
+        if (parts.some((part) => !Number.isFinite(part) || part < 0)) return 0;
+        if (parts.length === 2) return (parts[0] * 60) + parts[1];
+        if (parts.length === 3) return (parts[0] * 3600) + (parts[1] * 60) + parts[2];
+      }
+      return 0;
+    };
+
+    await new Promise((resolve, reject) => {
+      const child = spawn(YT_DLP_PATH, args, {
+        cwd: storageDir,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      if (ytDebugEnabled) {
+        logger.info('yt-dlp spawned', {
+          jobId: job && job.id,
+          pid: child && child.pid,
+          hasStdout: Boolean(child && child.stdout),
+          hasStderr: Boolean(child && child.stderr),
+        });
+      }
+
+      const cancelPoll = setInterval(() => {
+        if (!job.cancelled) return;
+        if (!child.killed) {
+          child.kill('SIGTERM');
+        }
+      }, 250);
+
+      const finalize = (cb) => {
+        clearInterval(cancelPoll);
+        cb();
+      };
+
+      const handleYtDlpLine = (line, fromStderr = false) => {
+        const text = String(line || '').trim();
+        if (!text) return;
+
+        if (/^\[info\].*Downloading\s+\d+\s+format\(s\):/i.test(text)) {
+          const formatMatch = text.match(/format\(s\):\s*(.+)$/i);
+          const rawFormats = formatMatch ? String(formatMatch[1] || '').trim() : '';
+          const formatCount = rawFormats
+            ? rawFormats.split(',').reduce((count, group) => {
+              const parts = String(group || '')
+                .split('+')
+                .map((part) => String(part || '').trim())
+                .filter(Boolean);
+              return count + (parts.length || 0);
+            }, 0)
+            : 0;
+          if (formatCount > 0) {
+            totalDownloadPhases = Math.max(1, Math.min(6, formatCount));
+            currentDownloadPhaseIndex = 0;
+            currentPhaseProgress = 0;
+            destinationLineCount = 0;
+          }
+        }
+
+        if (/^\[download\]\s+Destination:/i.test(text)) {
+          destinationLineCount += 1;
+          currentDownloadPhaseIndex = Math.min(
+            Math.max(0, destinationLineCount - 1),
+            Math.max(0, totalDownloadPhases - 1),
+          );
+          currentPhaseProgress = 0;
+        }
+
+        if (text.startsWith('filepath=')) {
+          resolvedPath = text.slice('filepath='.length).trim();
+          return;
+        }
+
+        const applyProgress = (phasePercent = 0) => {
+          const boundedPhasePercent = Math.max(0, Math.min(100, Math.round(phasePercent)));
+          if (boundedPhasePercent > currentPhaseProgress) {
+            currentPhaseProgress = boundedPhasePercent;
+          }
+
+          let nextProgress = 0;
+          if (totalDownloadPhases > 1) {
+            const completedPhases = Math.max(0, Math.min(currentDownloadPhaseIndex, totalDownloadPhases));
+            const combinedPercent = ((completedPhases + (currentPhaseProgress / 100)) / totalDownloadPhases) * 100;
+            nextProgress = Math.max(0, Math.min(99, Math.round(combinedPercent)));
+          } else {
+            nextProgress = Math.max(0, Math.min(99, currentPhaseProgress));
+          }
+
+          // Keep in-flight progress monotonic; final 100 is set only after yt-dlp exits.
+          job.progress = Math.max(Number(job.progress || 0), nextProgress);
+        };
+
+        let progressUpdated = false;
+        const customProgressMatch = text.match(
+          /(?:download:)?bytes=([^,]+),total=([^,]+),total_estimate=([^,]+),speed=([^,]+),eta=([^,]+)$/i
+        );
+        if (customProgressMatch) {
+          const downloadedBytes = parseByteMetric(customProgressMatch[1]);
+          const totalBytes = parseByteMetric(customProgressMatch[2]);
+          const estimatedTotalBytes = parseByteMetric(customProgressMatch[3]);
+          const speedBps = parseByteMetric(customProgressMatch[4]);
+          const etaSeconds = parseEtaSeconds(customProgressMatch[5]);
+          const resolvedTotalBytes = totalBytes > 0 ? totalBytes : estimatedTotalBytes;
+          const computedPercent = resolvedTotalBytes > 0
+            ? (downloadedBytes / resolvedTotalBytes) * 100
+            : 0;
+
+          if (downloadedBytes > 0) {
+            job.bytesDownloaded = downloadedBytes;
+          }
+          if (resolvedTotalBytes > 0) {
+            job.totalBytes = resolvedTotalBytes;
+          }
+          if (speedBps > 0) {
+            job.speedBps = speedBps;
+          }
+          if (etaSeconds > 0) {
+            job.etaSeconds = etaSeconds;
+          }
+          applyProgress(computedPercent);
+          progressUpdated = true;
+        }
+
+        if (!progressUpdated && /^\[download\]/i.test(text)) {
+          const percentMatch = text.match(/\[download\]\s+([0-9]+(?:\.[0-9]+)?)%/i);
+          const totalMatch = text.match(/\bof\s+~?\s*([0-9.]+\s*[kmgtp]?i?b)\b/i);
+          const speedMatch = text.match(/\bat\s+([0-9.]+\s*[kmgtp]?i?b\/s)\b/i);
+          const etaMatch = text.match(/\bETA\s+([0-9:]+)\b/i);
+          const downloadedOnlyMatch = text.match(/\[download\]\s+([0-9.]+\s*[kmgtp]?i?b)(?:\s+at|\s+ETA|\s*$)/i);
+
+          const percent = percentMatch ? parseMetricNumber(percentMatch[1]) : 0;
+          const totalBytes = totalMatch ? parseByteMetric(totalMatch[1]) : 0;
+          const speedBps = speedMatch ? parseByteMetric(speedMatch[1]) : 0;
+          const etaSeconds = etaMatch ? parseEtaSeconds(etaMatch[1]) : 0;
+          const downloadedBytes = downloadedOnlyMatch ? parseByteMetric(downloadedOnlyMatch[1]) : 0;
+          let computedPercent = percent;
+
+          if (downloadedBytes > 0) {
+            job.bytesDownloaded = downloadedBytes;
+            progressUpdated = true;
+          }
+          if (totalBytes > 0) {
+            job.totalBytes = totalBytes;
+            if (job.bytesDownloaded > 0) {
+              computedPercent = (job.bytesDownloaded / totalBytes) * 100;
+            }
+            progressUpdated = true;
+          }
+          if (percent > 0 || (Number.isFinite(computedPercent) && computedPercent > 0)) {
+            applyProgress(computedPercent);
+            if (job.totalBytes > 0 && job.progress > 0 && job.bytesDownloaded <= 0) {
+              job.bytesDownloaded = Math.round((job.totalBytes * job.progress) / 100);
+            }
+            progressUpdated = true;
+          }
+          if (speedBps > 0) {
+            job.speedBps = speedBps;
+            progressUpdated = true;
+          }
+          if (etaSeconds > 0) {
+            job.etaSeconds = etaSeconds;
+            progressUpdated = true;
+          }
+        }
+
+        if (progressUpdated) {
+          if (ytDebugEnabled && ytDebugLineCount < 40) {
+            ytDebugLineCount += 1;
+            logger.info('yt-dlp progress parsed', {
+              jobId: job && job.id,
+              progress: Number(job.progress || 0),
+              bytesDownloaded: Number(job.bytesDownloaded || 0),
+              totalBytes: Number(job.totalBytes || 0),
+              speedBps: Number(job.speedBps || 0),
+              etaSeconds: Number(job.etaSeconds || 0),
+            });
+          }
+          job.updatedAt = Date.now();
+          return;
+        }
+
+        if (fromStderr && /error/i.test(text)) {
+          lastErrorLine = text;
+        }
+
+        if (ytDebugEnabled && ytDebugLineCount < 40) {
+          ytDebugLineCount += 1;
+          logger.info('yt-dlp raw line', {
+            jobId: job && job.id,
+            from: fromStderr ? 'stderr' : 'stdout',
+            line: text.slice(0, 240),
+          });
+        }
+      };
+      const bindStreamLines = (stream, fromStderr = false) => {
+        if (!stream) return () => {};
+        let pending = '';
+        const onData = (chunk) => {
+          const text = `${pending}${String(chunk || '')}`;
+          const parts = text.split(/\r?\n|\r/g);
+          pending = parts.pop() || '';
+          for (const part of parts) {
+            handleYtDlpLine(part, fromStderr);
+          }
+        };
+        stream.on('data', onData);
+        return () => {
+          if (pending) {
+            handleYtDlpLine(pending, fromStderr);
+            pending = '';
+          }
+          stream.off('data', onData);
+        };
+      };
+
+      const flushStdout = bindStreamLines(child.stdout, false);
+      const flushStderr = bindStreamLines(child.stderr, true);
+
+      child.on('error', (err) => finalize(() => reject(err)));
+      child.on('close', (code) => finalize(() => {
+        flushStdout();
+        flushStderr();
+
+        if (job.cancelled) {
+          resolve();
+          return;
+        }
+
+        if (code === 0) {
+          resolve();
+          return;
+        }
+
+        reject(new Error(lastErrorLine || `yt-dlp exited with code ${code}`));
+      }));
+    });
+
+    if (job.cancelled) {
+      if (job.cleanupOnCancel) {
+        await cleanupCancelledDirectArtifacts(job);
+      }
+      job.status = 'cancelled';
+      job.updatedAt = Date.now();
+      return;
+    }
+
+    if (!resolvedPath) {
+      resolvedPath = await findLatestJobAsset(storageDir, job.id);
+    }
+
+    const finalPath = await resolveAccessibleOutputPath(resolvedPath, storageDir, job.id);
+    if (!finalPath) {
+      throw new Error('yt-dlp completed but no output file was reported');
+    }
+
+    const stats = await fsPromises.stat(finalPath);
+
+    job.filePath = finalPath;
+    job.mp4Path = finalPath;
+    job.downloadName = path.basename(finalPath);
+    job.downloadNameMp4 = path.basename(finalPath);
+    job.bytesDownloaded = Number(stats && stats.size || 0);
+    job.totalBytes = Number(stats && stats.size || 0);
+    job.progress = 100;
+    job.speedBps = 0;
+    job.etaSeconds = 0;
+    job.status = 'completed';
+    job.updatedAt = Date.now();
   }
 
   async function unlinkIfExists(filePath, context = {}) {
@@ -106,6 +610,61 @@ function createJobProcessor({
         await fsPromises.rm(jobStorageDir, { recursive: true, force: true });
       } catch (err) {
         logger.warn('Failed to remove job storage directory during cancellation cleanup', {
+          ...context,
+          jobStorageDir,
+          error: err && err.message,
+        });
+      }
+    }
+  }
+
+  async function cleanupCancelledDirectArtifacts(job) {
+    if (!job) return;
+    const context = { jobId: job && job.id, preserveSegments: false, mode: 'direct' };
+    const cleanupPaths = new Set();
+    const addPath = (candidatePath) => {
+      if (typeof candidatePath === 'string' && candidatePath.trim()) {
+        cleanupPaths.add(candidatePath);
+      }
+    };
+
+    addPath(job.filePath);
+    addPath(job.mp4Path);
+    addPath(job.filePath ? `${job.filePath}.part` : null);
+    addPath(job.mp4Path ? `${job.mp4Path}.part` : null);
+    addPath(job.subtitlePath);
+    addPath(job.subtitleZipPath);
+    addPath(job.thumbnailPath);
+    addPath(job.id && job.storageDir ? path.join(job.storageDir, `${job.id}-thumb.jpg`) : null);
+    addPath(job.id && job.storageDir ? path.join(job.storageDir, `${job.id}-subtitles.srt`) : null);
+    addPath(job.id && job.storageDir ? path.join(job.storageDir, `${job.id}-subtitles.zip`) : null);
+
+    if (Array.isArray(job.thumbnailPaths)) {
+      job.thumbnailPaths.forEach((candidatePath) => addPath(candidatePath));
+    }
+
+    await Promise.all(Array.from(cleanupPaths).map((candidatePath) => unlinkIfExists(candidatePath, context)));
+
+    const jobStorageDir = (() => {
+      if (typeof job.storageDir === 'string' && job.storageDir.trim()) {
+        return job.storageDir;
+      }
+      if (typeof job.filePath === 'string' && job.filePath.trim()) {
+        return path.dirname(job.filePath);
+      }
+      return '';
+    })();
+
+    if (
+      jobStorageDir
+      && job.id
+      && path.resolve(path.dirname(jobStorageDir)) === path.resolve(downloadDir)
+      && path.basename(jobStorageDir) === String(job.id)
+    ) {
+      try {
+        await fsPromises.rm(jobStorageDir, { recursive: true, force: true });
+      } catch (err) {
+        logger.warn('Failed to remove direct job storage directory during cancellation cleanup', {
           ...context,
           jobStorageDir,
           error: err && err.message,
@@ -234,6 +793,15 @@ function createJobProcessor({
       logger.info('Direct job started', { jobId: job && job.id, url: job && job.url });
       job.status = 'downloading';
       job.updatedAt = Date.now();
+      job.speedBps = 0;
+      job.etaSeconds = null;
+
+      if (isYouTubeUrl(job && job.url)) {
+        await runYouTubeDirectJob(job);
+        logger.info('Direct job finished via yt-dlp', { jobId: job && job.id, status: job && job.status });
+        return;
+      }
+
       if (!job.storageDir && job.filePath) {
         job.storageDir = path.dirname(job.filePath);
       }
@@ -332,6 +900,9 @@ function createJobProcessor({
 
       if (!downloaded && job.cancelled) {
         await unlinkIfExists(tempFilePath, { jobId: job && job.id, reason: 'direct-cancelled' });
+        if (job.cleanupOnCancel) {
+          await cleanupCancelledDirectArtifacts(job);
+        }
         job.status = 'cancelled';
         job.updatedAt = Date.now();
         return;
@@ -342,13 +913,20 @@ function createJobProcessor({
       }
 
       if (job.cancelled) {
+        if (job.cleanupOnCancel) {
+          await cleanupCancelledDirectArtifacts(job);
+        }
         job.status = 'cancelled';
+        job.speedBps = 0;
+        job.etaSeconds = null;
       } else {
         job.status = 'completed';
         job.progress = 100;
         // For direct MP4 downloads, the primary asset is already an MP4 file.
         // Point mp4Path at filePath so the existing /api/jobs/:id/file route works.
         job.mp4Path = job.filePath;
+        job.speedBps = 0;
+        job.etaSeconds = 0;
       }
       job.updatedAt = Date.now();
       logger.info('Direct job finished', { jobId: job && job.id, status: job.status });
@@ -356,11 +934,18 @@ function createJobProcessor({
       logger.error('Direct job failed', { jobId: job && job.id, error: err && err.message });
       if (job) {
         if (job.cancelled) {
+          if (job.cleanupOnCancel) {
+            await cleanupCancelledDirectArtifacts(job);
+          }
           job.status = 'cancelled';
           job.error = null;
+          job.speedBps = 0;
+          job.etaSeconds = null;
         } else {
           job.status = 'error';
           job.error = (err && err.message) || 'Direct download failure';
+          job.speedBps = 0;
+          job.etaSeconds = null;
         }
         job.updatedAt = Date.now();
       }

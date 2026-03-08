@@ -13,7 +13,7 @@ export interface DesktopBridge {
   saveSettings(settings: Partial<DesktopSettings>): Promise<DesktopSettings>;
   getUpdaterState(): Promise<UpdaterState>;
   checkForUpdates(): Promise<{ ok: boolean }>;
-  installUpdateNow(): Promise<{ ok: boolean }>;
+  installUpdateNow(): Promise<{ ok: boolean; error?: string }>;
   remindLater(minutes: number): Promise<{ ok: boolean; deferredUntil?: number }>;
   saveDiagnosticsFile(payload: unknown): Promise<{ ok: boolean; filePath?: string; error?: string }>;
   openDiagnosticsFolder(): Promise<{ ok: boolean; folderPath?: string; error?: string }>;
