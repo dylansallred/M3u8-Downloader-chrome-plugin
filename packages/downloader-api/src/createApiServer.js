@@ -160,6 +160,7 @@ function createApiServer(options = {}) {
     dataDir,
     downloadDir,
     initialQueueSettings,
+    getCompletedOutputDir,
     ffmpegPath,
     ffprobePath,
     trustBinaryPaths = false,
@@ -317,6 +318,7 @@ function createApiServer(options = {}) {
     runJob,
     runDirectJob,
     initialSettings: initialQueueSettings,
+    getCompletedOutputDir,
   });
 
   let notifyHistoryChange = () => {};

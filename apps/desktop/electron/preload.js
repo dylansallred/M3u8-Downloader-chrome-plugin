@@ -4,6 +4,7 @@ contextBridge.exposeInMainWorld('desktop', {
   getAppInfo: () => ipcRenderer.invoke('app:get-info'),
   getSettings: () => ipcRenderer.invoke('settings:get'),
   saveSettings: (settings) => ipcRenderer.invoke('settings:save', settings),
+  chooseOutputDirectory: () => ipcRenderer.invoke('settings:choose-output-directory'),
   getUpdaterState: () => ipcRenderer.invoke('updater:get-state'),
   checkForUpdates: () => ipcRenderer.invoke('updater:check-now'),
   installUpdateNow: () => ipcRenderer.invoke('updater:install-now'),

@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { Button } from '@/components/ui/button';
-import { Eye, EyeOff } from 'lucide-react';
+import { Eye, EyeOff, FolderOpen, X } from 'lucide-react';
 import type { DesktopSettings } from '@/types/settings';
 import type { QueueSettings } from '@/types/queue';
 
@@ -22,6 +22,14 @@ export function DesktopSettingsCard({
 }: DesktopSettingsCardProps) {
   const [showTmdbKey, setShowTmdbKey] = useState(false);
   const [showSubdlKey, setShowSubdlKey] = useState(false);
+  const outputDirectory = String(settings.outputDirectory || '').trim();
+
+  const chooseOutputDirectory = async () => {
+    const result = await window.desktop.chooseOutputDirectory();
+    if (result?.ok && result.path) {
+      onSave({ outputDirectory: result.path });
+    }
+  };
 
   return (
     <Card className="bg-background-raised border-border">
@@ -67,6 +75,39 @@ export function DesktopSettingsCard({
             checked={queueSettings.autoStart !== false}
             onCheckedChange={(checked) => onSaveQueueSettings({ autoStart: checked })}
           />
+        </div>
+
+        <div className="border-t border-border pt-4 space-y-2">
+          <label className="text-sm text-foreground font-medium">Completed video folder</label>
+          <p className="text-xs text-foreground-muted">
+            Downloads still process in the app data folder first, then the finished video is moved here after completion.
+          </p>
+          <div className="flex items-center gap-2">
+            <Input
+              readOnly
+              value={outputDirectory || 'Default internal downloads folder'}
+              className="flex-1 h-8 text-sm bg-background border-border"
+            />
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-8 px-2"
+              onClick={chooseOutputDirectory}
+            >
+              <FolderOpen className="size-4" />
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-8 px-2"
+              disabled={!outputDirectory}
+              onClick={() => onSave({ outputDirectory: '' })}
+            >
+              <X className="size-4" />
+            </Button>
+          </div>
         </div>
 
         <div className="border-t border-border pt-4 space-y-2">

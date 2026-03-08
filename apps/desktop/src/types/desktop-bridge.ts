@@ -12,6 +12,7 @@ export interface DesktopBridge {
   getAppInfo(): Promise<AppInfo>;
   getSettings(): Promise<DesktopSettings>;
   saveSettings(settings: Partial<DesktopSettings>): Promise<DesktopSettings>;
+  chooseOutputDirectory(): Promise<{ ok: boolean; path?: string; cancelled?: boolean; error?: string }>;
   getUpdaterState(): Promise<UpdaterState>;
   checkForUpdates(): Promise<{ ok: boolean }>;
   installUpdateNow(): Promise<{ ok: boolean; error?: string }>;

@@ -10,6 +10,7 @@ export function useAppInit() {
     queueMaxConcurrent: 1,
     queueAutoStart: true,
     checkUpdatesOnStartup: true,
+    outputDirectory: '',
     tmdbApiKey: '',
     subdlApiKey: '',
     downloadThreads: 8,

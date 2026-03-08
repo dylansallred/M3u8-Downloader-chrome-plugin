@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell, session, Notification } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, session, Notification, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { autoUpdater } = require('electron-updater');
@@ -44,6 +44,7 @@ function readSettings() {
         queueMaxConcurrent: 1,
         queueAutoStart: true,
         checkUpdatesOnStartup: true,
+        outputDirectory: '',
         tmdbApiKey: '',
         subdlApiKey: '',
         downloadThreads: 8,
@@ -54,6 +55,7 @@ function readSettings() {
       queueMaxConcurrent: parsed.queueMaxConcurrent ?? 1,
       queueAutoStart: parsed.queueAutoStart ?? true,
       checkUpdatesOnStartup: parsed.checkUpdatesOnStartup ?? true,
+      outputDirectory: parsed.outputDirectory ?? '',
       tmdbApiKey: parsed.tmdbApiKey ?? '',
       subdlApiKey: parsed.subdlApiKey ?? '',
       downloadThreads: parsed.downloadThreads ?? 8,
@@ -63,6 +65,7 @@ function readSettings() {
       queueMaxConcurrent: 1,
       queueAutoStart: true,
       checkUpdatesOnStartup: true,
+      outputDirectory: '',
       tmdbApiKey: '',
       subdlApiKey: '',
       downloadThreads: 8,
@@ -328,6 +331,25 @@ function isTranslocatedMacApp() {
   }
 }
 
+function isInstalledInApplicationsFolder() {
+  if (process.platform !== 'darwin') return true;
+  try {
+    if (typeof app.isInApplicationsFolder === 'function') {
+      return app.isInApplicationsFolder();
+    }
+  } catch {
+    // Fall through to path heuristic.
+  }
+
+  try {
+    const exePath = String(app.getPath('exe') || '');
+    const homeApplications = path.join(app.getPath('home'), 'Applications') + path.sep;
+    return exePath.startsWith('/Applications/') || exePath.startsWith(homeApplications);
+  } catch {
+    return false;
+  }
+}
+
 function normalizeReleaseNotes(updateInfo) {
   const source = updateInfo?.releaseNotes;
   if (!source) return [];
@@ -578,6 +600,7 @@ async function startLocalApi() {
     appVersion: app.getVersion(),
     dataDir,
     downloadDir,
+    getCompletedOutputDir: () => String(readSettings().outputDirectory || '').trim(),
     ffmpegPath: bundledFfmpegPath || process.env.FFMPEG_PATH,
     ffprobePath: bundledFfprobePath || process.env.FFPROBE_PATH,
     ytDlpPath: bundledYtDlpPath || process.env.YTDLP_PATH || process.env.YT_DLP_PATH,
@@ -721,6 +744,22 @@ function registerIpc() {
       queueMaxConcurrent: Number(queueSettings?.maxConcurrent || merged.queueMaxConcurrent || 1),
       queueAutoStart: (queueSettings?.autoStart ?? merged.queueAutoStart) !== false,
     };
+  });
+
+  ipcMain.handle('settings:choose-output-directory', async () => {
+    try {
+      const current = readSettings();
+      const result = await dialog.showOpenDialog(mainWindow || undefined, {
+        properties: ['openDirectory', 'createDirectory'],
+        defaultPath: String(current.outputDirectory || '').trim() || app.getPath('downloads'),
+      });
+      if (result.canceled || !result.filePaths || result.filePaths.length === 0) {
+        return { ok: false, cancelled: true };
+      }
+      return { ok: true, path: result.filePaths[0] };
+    } catch (err) {
+      return { ok: false, error: String(err.message || err) };
+    }
   });
 
   ipcMain.handle('app:save-diagnostics-file', async (event, payload) => {
@@ -873,6 +912,14 @@ function registerIpc() {
     }
     if (isTranslocatedMacApp()) {
       const error = 'Move the app to /Applications before installing updates';
+      updaterState.phase = 'error';
+      updaterState.message = 'Update install blocked';
+      updaterState.error = error;
+      sendToRenderer('updater:event', updaterState);
+      return { ok: false, error };
+    }
+    if (!isInstalledInApplicationsFolder()) {
+      const error = 'Auto-update only works when VidSnag is installed in /Applications';
       updaterState.phase = 'error';
       updaterState.message = 'Update install blocked';
       updaterState.error = error;

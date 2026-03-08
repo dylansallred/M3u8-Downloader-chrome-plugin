@@ -74,14 +74,18 @@ function decodeCursor(cursor) {
 
 function normalizeStoredItem(item) {
   if (!item || typeof item.fileName !== 'string') return null;
+  const absolutePath = typeof item.absolutePath === 'string' && item.absolutePath.trim()
+    ? item.absolutePath.trim()
+    : null;
   const rawRelativePath = item.relativePath || item.fileName;
   const safeRelativePath = normalizeRelativePath(rawRelativePath);
-  if (!safeRelativePath) return null;
+  if (!safeRelativePath && !absolutePath) return null;
   return {
     ...item,
-    id: safeRelativePath,
+    id: safeRelativePath || absolutePath,
     fileName: path.basename(item.fileName),
-    relativePath: safeRelativePath,
+    relativePath: safeRelativePath || item.fileName,
+    absolutePath,
   };
 }
 
@@ -254,6 +258,42 @@ class HistoryIndexService {
     return files;
   }
 
+  collectExternalJobMediaFiles() {
+    const files = [];
+    if (!this.jobs || typeof this.jobs.values !== 'function') {
+      return files;
+    }
+
+    for (const job of this.jobs.values()) {
+      if (!job) continue;
+      const status = String(job.queueStatus || job.status || '').trim();
+      if (!status || !TERMINAL_STATUSES.has(status)) continue;
+
+      const candidatePath = job.mp4Path && fs.existsSync(job.mp4Path) ? job.mp4Path : job.filePath;
+      if (typeof candidatePath !== 'string' || !candidatePath.trim()) continue;
+      if (!fs.existsSync(candidatePath)) continue;
+      const relative = this.toRelativePath(candidatePath);
+      if (relative) continue;
+
+      try {
+        const stat = fs.statSync(candidatePath);
+        if (!stat.isFile()) continue;
+        files.push({
+          fullPath: candidatePath,
+          absolutePath: candidatePath,
+          relativePath: path.basename(candidatePath),
+          fileName: path.basename(candidatePath),
+          dirRelative: '',
+          stat,
+        });
+      } catch {
+        continue;
+      }
+    }
+
+    return files;
+  }
+
   findThumbnailUrl({ validJobId, dirAbsolute, dirRelative, job }) {
     const localThumbCandidates = [];
     if (validJobId) {
@@ -340,6 +380,7 @@ class HistoryIndexService {
       id: relativePath,
       fileName,
       relativePath,
+      absolutePath: mediaFile.absolutePath || mediaFile.fullPath,
       label: deriveLabel(fileName),
       jobId: validJobId,
       title: (job && job.title) || null,
@@ -355,7 +396,7 @@ class HistoryIndexService {
 
   static buildSignature(items) {
     return items
-      .map((item) => `${item.relativePath || item.fileName}:${item.sizeBytes}:${item.modifiedAt}`)
+      .map((item) => `${item.absolutePath || item.relativePath || item.fileName}:${item.sizeBytes}:${item.modifiedAt}`)
       .join('|');
   }
 
@@ -374,6 +415,7 @@ class HistoryIndexService {
       this.lastRefreshAt = Date.now();
 
       const mediaFiles = await this.walkMediaFiles();
+      mediaFiles.push(...this.collectExternalJobMediaFiles());
       const filesByDir = new Map();
       for (const mediaFile of mediaFiles) {
         const key = mediaFile.dirRelative || '';
@@ -450,6 +492,9 @@ class HistoryIndexService {
   resolveFilePath(fileName) {
     const item = this.findByFileName(fileName);
     if (!item) return null;
+    if (item.absolutePath && fs.existsSync(item.absolutePath)) {
+      return item.absolutePath;
+    }
     const safeRelative = normalizeRelativePath(item.relativePath || item.fileName);
     if (!safeRelative) return null;
     const resolved = path.resolve(this.downloadDir, safeRelative);

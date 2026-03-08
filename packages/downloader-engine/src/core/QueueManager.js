@@ -11,6 +11,7 @@ class QueueManager {
       runJob,
       runDirectJob,
       initialSettings,
+      getCompletedOutputDir = null,
       maxPersistedJobs = 200,
       completedRetentionMs = 7 * 24 * 60 * 60 * 1000,
     } = options || {};
@@ -44,6 +45,9 @@ class QueueManager {
     this.jobs = jobs;
     this.runJob = runJob;
     this.runDirectJob = runDirectJob;
+    this.getCompletedOutputDir = typeof getCompletedOutputDir === 'function'
+      ? getCompletedOutputDir
+      : null;
 
     this.loadQueue();
   }
@@ -164,6 +168,103 @@ class QueueManager {
 
     if (removedCount > 0) {
       logger.info('Removed orphan temp directories', { removedCount });
+    }
+  }
+
+  sanitizeFinalFileName(rawName, fallbackExt = '') {
+    const raw = String(rawName || '').trim();
+    const normalized = raw
+      .replace(/[<>:"/\\|?*\u0000-\u001F]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .replace(/[. ]+$/g, '')
+      .trim();
+
+    let safeName = normalized || 'Download';
+    if (fallbackExt) {
+      const ext = String(fallbackExt || '').trim();
+      if (ext && !safeName.toLowerCase().endsWith(ext.toLowerCase())) {
+        safeName = safeName.replace(/\.[a-z0-9]{2,4}$/i, '').trim();
+        safeName = `${safeName}${ext}`;
+      }
+    }
+    return safeName;
+  }
+
+  resolveUniqueOutputPath(targetDir, fileName) {
+    const ext = path.extname(fileName);
+    const base = ext ? fileName.slice(0, -ext.length) : fileName;
+    let attempt = 0;
+    let candidate = path.join(targetDir, fileName);
+    while (fs.existsSync(candidate)) {
+      attempt += 1;
+      candidate = path.join(targetDir, `${base} (${attempt})${ext}`);
+    }
+    return candidate;
+  }
+
+  relocateCompletedArtifact(job) {
+    if (!job) return;
+
+    const primaryPath = job.mp4Path && fs.existsSync(job.mp4Path) ? job.mp4Path : job.filePath;
+    if (!primaryPath || !fs.existsSync(primaryPath)) return;
+
+    const preferredDir = this.getCompletedOutputDir ? String(this.getCompletedOutputDir() || '').trim() : '';
+    const targetDir = preferredDir || path.dirname(primaryPath);
+    if (!targetDir) return;
+
+    const ext = path.extname(primaryPath) || (job.mp4Path ? '.mp4' : '');
+    const preferredBaseName = this.sanitizeFinalFileName(job.title || job.downloadNameMp4 || job.downloadName || 'Download', ext);
+
+    try {
+      fs.mkdirSync(targetDir, { recursive: true });
+      const resolvedCurrent = path.resolve(primaryPath);
+      const resolvedTargetDir = path.resolve(targetDir);
+      const currentDir = path.dirname(resolvedCurrent);
+      const sameDir = currentDir === resolvedTargetDir;
+      const currentBaseName = path.basename(resolvedCurrent);
+
+      let targetPath = path.join(resolvedTargetDir, preferredBaseName);
+      if (sameDir && currentBaseName === preferredBaseName) {
+        targetPath = resolvedCurrent;
+      } else if (fs.existsSync(targetPath)) {
+        if (path.resolve(targetPath) !== resolvedCurrent) {
+          targetPath = this.resolveUniqueOutputPath(resolvedTargetDir, preferredBaseName);
+        }
+      }
+
+      if (targetPath !== resolvedCurrent) {
+        fs.renameSync(resolvedCurrent, targetPath);
+      }
+
+      if (job.mp4Path && path.resolve(job.mp4Path) === resolvedCurrent) {
+        job.mp4Path = targetPath;
+        job.downloadNameMp4 = path.basename(targetPath);
+        if (!job.filePath || path.resolve(job.filePath) === resolvedCurrent) {
+          job.filePath = targetPath;
+          job.downloadName = path.basename(targetPath);
+        }
+      } else {
+        job.filePath = targetPath;
+        job.downloadName = path.basename(targetPath);
+        if (!job.mp4Path) {
+          job.downloadNameMp4 = path.basename(targetPath).replace(/\.[a-z0-9]{2,4}$/i, '.mp4');
+        }
+      }
+
+      job.outputPath = targetPath;
+      job.outputDirectory = path.dirname(targetPath);
+      job.updatedAt = Date.now();
+    } catch (err) {
+      logger.warn('Failed to relocate completed artifact', {
+        jobId: job.id,
+        preferredDir,
+        primaryPath,
+        error: err && err.message,
+      });
+      if (!job.error) {
+        job.error = `Completed file move failed: ${(err && err.message) || 'Unknown error'}`;
+        job.status = 'completed-with-errors';
+      }
     }
   }
 
@@ -490,6 +591,7 @@ class QueueManager {
 
     // Update queue status based on job status
     if (job.status === 'completed' || job.status === 'completed-with-errors') {
+      this.relocateCompletedArtifact(job);
       job.queueStatus = 'completed';
       job.completedAt = Date.now();
     } else if (job.status === 'error') {
