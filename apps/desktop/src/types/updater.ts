@@ -4,7 +4,9 @@ export interface UpdaterState {
   phase: UpdaterPhase;
   message: string;
   progress: number;
+  currentVersion?: string | null;
   updateInfo?: { version: string } | null;
+  lastCheckedAt?: number | null;
   releaseNotes?: string | string[];
   deferredUntil?: number | null;
   nextReminderAt?: number | null;

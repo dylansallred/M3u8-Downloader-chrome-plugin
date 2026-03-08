@@ -96,6 +96,7 @@ function App() {
           {currentView === 'settings' && (
             <SettingsView
               apiBase={apiBase}
+              appInfo={appInfo}
               settings={settings}
               queueSettings={queueSettings}
               onSaveSettings={saveSettings}

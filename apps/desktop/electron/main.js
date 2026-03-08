@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell, session } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, session, Notification } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { autoUpdater } = require('electron-updater');
@@ -17,6 +17,7 @@ const updaterState = {
   phase: 'idle',
   message: 'Idle',
   progress: 0,
+  currentVersion: null,
   updateInfo: null,
   releaseNotes: [],
   deferredUntil: null,
@@ -313,6 +314,19 @@ function normalizeReleaseNotes(updateInfo) {
   return [];
 }
 
+function showUpdateNotification(title, body) {
+  try {
+    if (!Notification || !Notification.isSupported()) return;
+    new Notification({
+      title,
+      body,
+      silent: false,
+    }).show();
+  } catch {
+    // Notification delivery is best-effort.
+  }
+}
+
 function scheduleUpdaterReminder(delayMs, intervalMs) {
   clearUpdaterReminderTimer();
   const safeDelay = Math.max(5_000, Number(delayMs) || 0);
@@ -354,6 +368,7 @@ function configureAutoUpdater() {
     updaterState.reminderIntervalMs = null;
     updaterState.lastCheckedAt = Date.now();
     updaterState.error = null;
+    updaterState.currentVersion = app.getVersion();
     sendToRenderer('updater:event', updaterState);
   });
 
@@ -369,7 +384,12 @@ function configureAutoUpdater() {
     updaterState.nextReminderAt = null;
     updaterState.reminderIntervalMs = null;
     updaterState.error = null;
+    updaterState.currentVersion = app.getVersion();
     sendToRenderer('updater:event', updaterState);
+    showUpdateNotification(
+      'VidSnag update available',
+      `Version ${info.version} is available and is downloading now.`,
+    );
   });
 
   autoUpdater.on('update-not-available', (info) => {
@@ -377,7 +397,7 @@ function configureAutoUpdater() {
     updaterInstallRequested = false;
     clearUpdaterReminderTimer();
     updaterState.phase = 'idle';
-    updaterState.message = 'You are up to date.';
+    updaterState.message = `You are up to date on version ${app.getVersion()}.`;
     updaterState.updateInfo = info || null;
     updaterState.releaseNotes = normalizeReleaseNotes(info);
     updaterState.progress = 0;
@@ -385,6 +405,7 @@ function configureAutoUpdater() {
     updaterState.nextReminderAt = null;
     updaterState.reminderIntervalMs = null;
     updaterState.error = null;
+    updaterState.currentVersion = app.getVersion();
     sendToRenderer('updater:event', updaterState);
   });
 
@@ -393,6 +414,7 @@ function configureAutoUpdater() {
     updaterState.progress = Math.round(progress.percent || 0);
     updaterState.message = `Downloading update... ${updaterState.progress}%`;
     updaterState.error = null;
+    updaterState.currentVersion = app.getVersion();
     sendToRenderer('updater:event', updaterState);
   });
 
@@ -409,7 +431,12 @@ function configureAutoUpdater() {
     updaterState.nextReminderAt = null;
     updaterState.reminderIntervalMs = null;
     updaterState.error = null;
+    updaterState.currentVersion = app.getVersion();
     sendToRenderer('updater:event', updaterState);
+    showUpdateNotification(
+      'VidSnag update ready',
+      `Version ${info.version} has been downloaded. Restart the app to install it.`,
+    );
   });
 
   autoUpdater.on('error', (error) => {
@@ -422,11 +449,16 @@ function configureAutoUpdater() {
     updaterState.nextReminderAt = null;
     updaterState.reminderIntervalMs = null;
     updaterState.error = error ? String(error.message || error) : 'Unknown updater error';
+    updaterState.currentVersion = app.getVersion();
     sendToRenderer('updater:event', updaterState);
   });
 }
 
 async function checkForUpdatesNow() {
+  updaterState.phase = 'checking';
+  updaterState.message = 'Checking for updates...';
+  updaterState.error = null;
+  updaterState.currentVersion = app.getVersion();
   updaterState.lastCheckedAt = Date.now();
   sendToRenderer('updater:event', updaterState);
   try {
@@ -569,6 +601,7 @@ function registerIpc() {
     version: app.getVersion(),
     apiBaseUrl: `http://${apiHost}:${apiPort}`,
     apiVersion: API.apiVersion,
+    isPackaged: app.isPackaged,
   }));
 
   ipcMain.handle('settings:get', async () => {

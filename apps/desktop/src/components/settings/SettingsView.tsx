@@ -2,11 +2,13 @@ import type { DesktopSettings } from '@/types/settings';
 import type { UpdaterState } from '@/types/updater';
 import type { CompatibilityInfo } from '@/types/compatibility';
 import type { QueueSettings } from '@/types/queue';
+import type { AppInfo } from '@/types/desktop-bridge';
 import { DesktopSettingsCard } from './DesktopSettingsCard';
 import { UpdaterCard } from './UpdaterCard';
 
 interface SettingsViewProps {
   apiBase: string;
+  appInfo: AppInfo | null;
   settings: DesktopSettings;
   queueSettings: QueueSettings;
   onSaveSettings: (next: Partial<DesktopSettings>) => void;
@@ -16,6 +18,7 @@ interface SettingsViewProps {
 }
 
 export function SettingsView({
+  appInfo,
   settings,
   queueSettings,
   onSaveSettings,
@@ -31,7 +34,7 @@ export function SettingsView({
         onSave={onSaveSettings}
         onSaveQueueSettings={onSaveQueueSettings}
       />
-      <UpdaterCard updater={updater} />
+      <UpdaterCard updater={updater} appInfo={appInfo} />
     </div>
   );
 }

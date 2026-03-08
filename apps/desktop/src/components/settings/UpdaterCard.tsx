@@ -6,15 +6,20 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { Download, RefreshCw, Clock } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import type { UpdaterState } from '@/types/updater';
+import type { AppInfo } from '@/types/desktop-bridge';
 import { normalizeReleaseNotes } from '@/lib/utils';
 
 interface UpdaterCardProps {
   updater: UpdaterState;
+  appInfo: AppInfo | null;
 }
 
-export function UpdaterCard({ updater }: UpdaterCardProps) {
+export function UpdaterCard({ updater, appInfo }: UpdaterCardProps) {
   const releaseNotes = useMemo(() => normalizeReleaseNotes(updater.releaseNotes), [updater.releaseNotes]);
   const [notesOpen, setNotesOpen] = useState(false);
+  const currentVersion = updater.currentVersion || appInfo?.version || 'unknown';
+  const latestVersion = updater.updateInfo?.version || null;
+  const isPackaged = appInfo?.isPackaged !== false;
 
   const phaseColor: Record<string, string> = {
     idle: 'bg-foreground-muted/15 text-foreground-muted',
@@ -37,6 +42,27 @@ export function UpdaterCard({ updater }: UpdaterCardProps) {
       </CardHeader>
       <CardContent className="space-y-3">
         <p className="text-sm text-foreground-muted">{updater.message}</p>
+
+        <div className="grid grid-cols-2 gap-3 text-xs text-foreground-muted">
+          <div>
+            <span className="text-foreground-subtle">Current version:</span> {currentVersion}
+          </div>
+          <div>
+            <span className="text-foreground-subtle">Latest version:</span> {latestVersion || 'Not checked yet'}
+          </div>
+        </div>
+
+        {updater.lastCheckedAt && (
+          <p className="text-xs text-foreground-subtle">
+            Last checked: {new Date(updater.lastCheckedAt).toLocaleString()}
+          </p>
+        )}
+
+        {!isPackaged && (
+          <p className="text-xs text-foreground-subtle">
+            Auto-update checks only work in packaged app builds.
+          </p>
+        )}
 
         {updater.phase === 'downloading' && (
           <Progress value={updater.progress || 0} className="h-1" />
@@ -70,6 +96,7 @@ export function UpdaterCard({ updater }: UpdaterCardProps) {
             size="sm"
             variant="outline"
             className="h-7 text-xs gap-1.5"
+            disabled={!isPackaged}
             onClick={() => window.desktop.checkForUpdates()}
           >
             <RefreshCw className="size-3" /> Check
@@ -81,7 +108,7 @@ export function UpdaterCard({ updater }: UpdaterCardProps) {
             disabled={updater.phase !== 'downloaded'}
             onClick={() => window.desktop.installUpdateNow()}
           >
-            <Download className="size-3" /> Install
+            <Download className="size-3" /> Restart & Install
           </Button>
           <Button
             size="sm"

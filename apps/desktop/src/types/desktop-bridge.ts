@@ -5,6 +5,7 @@ export interface AppInfo {
   version: string;
   apiBaseUrl: string;
   apiVersion: string;
+  isPackaged: boolean;
 }
 
 export interface DesktopBridge {
