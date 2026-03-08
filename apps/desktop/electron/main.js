@@ -28,6 +28,7 @@ const updaterState = {
 };
 
 const appSettingsPath = () => path.join(app.getPath('userData'), 'settings.json');
+const updaterInstallStatePath = () => path.join(app.getPath('userData'), 'updater-install-state.json');
 
 function getLogsDirPath() {
   const logsDir = path.join(app.getPath('userData'), 'logs');
@@ -77,6 +78,37 @@ function writeSettings(next) {
   fs.mkdirSync(path.dirname(appSettingsPath()), { recursive: true });
   fs.writeFileSync(appSettingsPath(), JSON.stringify(merged, null, 2), 'utf8');
   return merged;
+}
+
+function readUpdaterInstallState() {
+  try {
+    const file = updaterInstallStatePath();
+    if (!fs.existsSync(file)) return null;
+    return JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+function writeUpdaterInstallState(next) {
+  try {
+    const file = updaterInstallStatePath();
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify(next, null, 2), 'utf8');
+  } catch (err) {
+    console.warn('[desktop] Failed to persist updater install state', err);
+  }
+}
+
+function clearUpdaterInstallState() {
+  try {
+    const file = updaterInstallStatePath();
+    if (fs.existsSync(file)) {
+      fs.unlinkSync(file);
+    }
+  } catch (err) {
+    console.warn('[desktop] Failed to clear updater install state', err);
+  }
 }
 
 function buildDiagnosticsFilePath() {
@@ -325,6 +357,36 @@ function showUpdateNotification(title, body) {
   } catch {
     // Notification delivery is best-effort.
   }
+}
+
+function reconcileUpdaterInstallState() {
+  const state = readUpdaterInstallState();
+  const currentVersion = app.getVersion();
+  updaterState.currentVersion = currentVersion;
+  if (!state || !state.targetVersion) return;
+
+  if (state.targetVersion === currentVersion || state.fromVersion !== currentVersion) {
+    console.info('[desktop] Previous updater install appears to have completed', {
+      fromVersion: state.fromVersion,
+      targetVersion: state.targetVersion,
+      currentVersion,
+    });
+    clearUpdaterInstallState();
+    return;
+  }
+
+  const attemptedAt = state.attemptedAt ? new Date(state.attemptedAt).toLocaleString() : 'an unknown time';
+  updaterState.phase = 'error';
+  updaterState.message = 'Previous update install did not complete';
+  updaterState.error = `Tried to install ${state.targetVersion} on ${attemptedAt}, but the app reopened on ${currentVersion}. Move the app to /Applications and retry.`;
+  updaterState.lastCheckedAt = Date.now();
+  console.warn('[desktop] Previous updater install did not complete', {
+    fromVersion: state.fromVersion,
+    targetVersion: state.targetVersion,
+    currentVersion,
+    attemptedAt: state.attemptedAt,
+  });
+  clearUpdaterInstallState();
 }
 
 function scheduleUpdaterReminder(delayMs, intervalMs) {
@@ -827,11 +889,19 @@ function registerIpc() {
 
     try {
       autoUpdater.autoInstallOnAppQuit = true;
+      writeUpdaterInstallState({
+        attemptedAt: new Date().toISOString(),
+        fromVersion: app.getVersion(),
+        targetVersion: updaterState.updateInfo?.version || null,
+        platform: process.platform,
+        exePath: app.getPath('exe'),
+      });
       setImmediate(() => {
         try {
           autoUpdater.quitAndInstall(false, true);
         } catch (err) {
           updaterInstallRequested = false;
+          clearUpdaterInstallState();
           updaterState.phase = 'error';
           updaterState.message = 'Update install failed';
           updaterState.error = String((err && err.message) || err || 'Unknown updater error');
@@ -840,20 +910,10 @@ function registerIpc() {
         }
       });
 
-      // Some environments ignore quitAndInstall; fallback to normal quit so autoInstallOnAppQuit can apply.
-      updaterInstallTimer = setTimeout(() => {
-        if (!updaterInstallRequested) return;
-        console.warn('[desktop] quitAndInstall did not exit promptly; falling back to app.quit()');
-        try {
-          app.quit();
-        } catch (err) {
-          console.error('[desktop] app.quit fallback failed', err);
-        }
-      }, 3_000);
-
       return { ok: true };
     } catch (err) {
       updaterInstallRequested = false;
+      clearUpdaterInstallState();
       updaterState.phase = 'error';
       updaterState.message = 'Update install failed';
       updaterState.error = String((err && err.message) || err || 'Unknown updater error');
@@ -894,6 +954,7 @@ async function bootstrap() {
   });
 
   await app.whenReady();
+  reconcileUpdaterInstallState();
 
   registerIpc();
   configureAutoUpdater();

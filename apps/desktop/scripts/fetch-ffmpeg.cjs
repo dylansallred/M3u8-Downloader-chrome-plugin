@@ -20,9 +20,19 @@ function resolveUrls() {
   }
 
   if (platform === 'darwin') {
+    const isArm64 = process.arch === 'arm64';
     return {
-      ffmpegUrl: ffmpegExplicit || 'https://evermeet.cx/ffmpeg/getrelease/ffmpeg',
-      ffprobeUrl: ffprobeExplicit || 'https://evermeet.cx/ffmpeg/getrelease/ffprobe',
+      // evermeet only publishes Intel macOS binaries; Apple Silicon needs a native arm64 source.
+      ffmpegUrl: ffmpegExplicit || (
+        isArm64
+          ? 'https://www.osxexperts.net/ffmpeg80arm.zip'
+          : 'https://evermeet.cx/ffmpeg/getrelease/ffmpeg'
+      ),
+      ffprobeUrl: ffprobeExplicit || (
+        isArm64
+          ? 'https://www.osxexperts.net/ffprobe80arm.zip'
+          : 'https://evermeet.cx/ffmpeg/getrelease/ffprobe'
+      ),
     };
   }
 
