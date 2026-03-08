@@ -1,7 +1,7 @@
 {
   "name": "m3u8-downloader-workspace",
   "private": true,
-  "version": "2.0.0",
+  "version": "2.0.18",
   "description": "Electron desktop app + Chrome extension for m3u8 downloading",
   "workspaces": [
     "apps/*",
