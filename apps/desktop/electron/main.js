@@ -1077,7 +1077,10 @@ function registerIpc() {
     sendToRenderer('updater:event', updaterState);
 
     try {
-      autoUpdater.autoInstallOnAppQuit = true;
+      // Keep explicit installs on the direct quitAndInstall() path. Enabling
+      // autoInstallOnAppQuit here breaks MacUpdater because it waits for a
+      // native update-downloaded event that is only triggered by another check.
+      autoUpdater.autoInstallOnAppQuit = false;
       writeUpdaterInstallState({
         attemptedAt: new Date().toISOString(),
         fromVersion: app.getVersion(),
