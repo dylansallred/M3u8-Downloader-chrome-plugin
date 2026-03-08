@@ -10,6 +10,7 @@ const ffmpegName = isWindows ? 'ffmpeg.exe' : 'ffmpeg';
 const ffprobeName = isWindows ? 'ffprobe.exe' : 'ffprobe';
 const ffmpegPath = path.join(outputDir, ffmpegName);
 const ffprobePath = path.join(outputDir, ffprobeName);
+const isDarwinArm64 = platform === 'darwin' && process.arch === 'arm64';
 
 function resolveUrls() {
   const ffmpegExplicit = String(process.env.FFMPEG_DOWNLOAD_URL || '').trim();
@@ -122,6 +123,79 @@ function canExecuteBinary(binaryPath) {
   return probe.status === 0;
 }
 
+function findExecutableInPath(command) {
+  const probe = spawnSync('which', [command], {
+    stdio: ['ignore', 'pipe', 'ignore'],
+    encoding: 'utf8',
+  });
+  if (probe.status !== 0) {
+    return '';
+  }
+  const resolved = String(probe.stdout || '').trim();
+  return resolved && fs.existsSync(resolved) ? resolved : '';
+}
+
+function getHomebrewPrefix(formulaName) {
+  const probe = spawnSync('brew', ['--prefix', formulaName], {
+    stdio: ['ignore', 'pipe', 'ignore'],
+    encoding: 'utf8',
+  });
+  if (probe.status !== 0) {
+    return '';
+  }
+  return String(probe.stdout || '').trim();
+}
+
+function installHomebrewFfmpegIfNeeded() {
+  const brewPath = findExecutableInPath('brew');
+  if (!brewPath) {
+    return false;
+  }
+
+  const existingPrefix = getHomebrewPrefix('ffmpeg');
+  if (existingPrefix) {
+    return true;
+  }
+
+  console.log('[fetch-ffmpeg] Installing ffmpeg via Homebrew as macOS arm64 fallback');
+  const install = spawnSync(brewPath, ['install', 'ffmpeg'], {
+    stdio: 'inherit',
+  });
+  return install.status === 0;
+}
+
+function tryCopySystemBinary(targetPath, binaryName) {
+  const candidates = [];
+
+  const pathMatch = findExecutableInPath(binaryName);
+  if (pathMatch) {
+    candidates.push(pathMatch);
+  }
+
+  const brewPrefix = getHomebrewPrefix('ffmpeg');
+  if (brewPrefix) {
+    candidates.push(path.join(brewPrefix, 'bin', binaryName));
+  }
+
+  for (const candidate of candidates) {
+    if (!candidate || !fs.existsSync(candidate)) continue;
+    try {
+      fs.copyFileSync(candidate, targetPath);
+      if (!isWindows) {
+        fs.chmodSync(targetPath, 0o755);
+      }
+      if (canExecuteBinary(targetPath)) {
+        console.log(`[fetch-ffmpeg] Using system ${binaryName} from ${candidate}`);
+        return true;
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  return false;
+}
+
 function extractArchiveIfNeeded(binaryPath, expectedName) {
   if (canExecuteBinary(binaryPath)) {
     return;
@@ -178,15 +252,31 @@ function extractArchiveIfNeeded(binaryPath, expectedName) {
 }
 
 async function run() {
-  const { ffmpegUrl, ffprobeUrl } = resolveUrls();
   fs.mkdirSync(outputDir, { recursive: true });
 
-  console.log(`[fetch-ffmpeg] Downloading ffmpeg from: ${ffmpegUrl}`);
-  await downloadWithRedirects(ffmpegUrl, ffmpegPath);
-  extractArchiveIfNeeded(ffmpegPath, ffmpegName);
-  console.log(`[fetch-ffmpeg] Downloading ffprobe from: ${ffprobeUrl}`);
-  await downloadWithRedirects(ffprobeUrl, ffprobePath);
-  extractArchiveIfNeeded(ffprobePath, ffprobeName);
+  if (isDarwinArm64 && !process.env.FFMPEG_DOWNLOAD_URL && !process.env.FFPROBE_DOWNLOAD_URL) {
+    const copiedFromSystem = tryCopySystemBinary(ffmpegPath, ffmpegName)
+      && tryCopySystemBinary(ffprobePath, ffprobeName);
+    if (!copiedFromSystem) {
+      const installed = installHomebrewFfmpegIfNeeded();
+      const copiedAfterInstall = installed
+        && tryCopySystemBinary(ffmpegPath, ffmpegName)
+        && tryCopySystemBinary(ffprobePath, ffprobeName);
+      if (!copiedAfterInstall) {
+        throw new Error(
+          'Unable to obtain native macOS arm64 ffmpeg/ffprobe. Install ffmpeg with Homebrew or set FFMPEG_DOWNLOAD_URL and FFPROBE_DOWNLOAD_URL.'
+        );
+      }
+    }
+  } else {
+    const { ffmpegUrl, ffprobeUrl } = resolveUrls();
+    console.log(`[fetch-ffmpeg] Downloading ffmpeg from: ${ffmpegUrl}`);
+    await downloadWithRedirects(ffmpegUrl, ffmpegPath);
+    extractArchiveIfNeeded(ffmpegPath, ffmpegName);
+    console.log(`[fetch-ffmpeg] Downloading ffprobe from: ${ffprobeUrl}`);
+    await downloadWithRedirects(ffprobeUrl, ffprobePath);
+    extractArchiveIfNeeded(ffprobePath, ffprobeName);
+  }
 
   if (!isWindows) {
     fs.chmodSync(ffmpegPath, 0o755);
