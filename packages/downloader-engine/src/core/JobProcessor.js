@@ -700,7 +700,8 @@ function createJobProcessor({
     }
   }
 
-  async function concatenateSegmentsStreaming(job, segments, jobTempDir, maxPartBytes) {
+  async function concatenateSegmentsStreaming(job, segments, jobTempDir, maxPartBytes, options = {}) {
+    const deleteTempSegments = options.deleteTempSegments !== false;
     const tsParts = [];
     let partIndex = 0;
     let currentStream = null;
@@ -791,9 +792,11 @@ function createJobProcessor({
         currentPartBytes += stats.size;
         totalBytesWritten += stats.size;
 
-        try {
-          await fsPromises.unlink(tempSegmentPath);
-        } catch (_) {
+        if (deleteTempSegments) {
+          try {
+            await fsPromises.unlink(tempSegmentPath);
+          } catch (_) {
+          }
         }
       }
 
@@ -1533,14 +1536,29 @@ function createJobProcessor({
         job.updatedAt = Date.now();
       }
 
-      const tsParts = await concatenateSegmentsStreaming(job, segments, jobTempDir, MAX_TS_PART_BYTES);
+      const segmentFiles = segments.map((_, index) => path.join(jobTempDir, `seg-${index}.ts`));
+      job.segmentFiles = segmentFiles;
+
+      const tsParts = await concatenateSegmentsStreaming(job, segments, jobTempDir, MAX_TS_PART_BYTES, {
+        deleteTempSegments: !FFMPEG_PATH,
+      });
       job.tsParts = tsParts;
       const filePathFinal = tsParts && tsParts.length > 0 ? tsParts[0] : job.filePath;
 
+      const remuxResult = await remuxAndGenerateThumbnails(job, filePathFinal, {
+        downloadDir,
+        FFMPEG_PATH,
+        FFPROBE_PATH,
+        skipThumbnailGeneration: job.skipThumbnailGeneration !== false,
+      });
+      if (remuxResult && remuxResult.usedTsFallback && remuxResult.error) {
+        job.error = remuxResult.error;
+      }
+
       try {
         const remainingFiles = await fsPromises.readdir(jobTempDir);
-        
-        // Delete any leftover temp files (failed attempts, etc.)
+
+        // Delete any leftover temp files after remux/fallback has finished using them.
         for (const file of remainingFiles) {
           try {
             await fsPromises.unlink(path.join(jobTempDir, file));
@@ -1552,8 +1570,7 @@ function createJobProcessor({
             });
           }
         }
-        
-        // Now delete the empty temp directory
+
         await fsPromises.rmdir(jobTempDir);
         logger.info('Cleaned up temp segment directory', {
           jobId: job.id,
@@ -1567,16 +1584,7 @@ function createJobProcessor({
           error: err && err.message,
         });
       }
-
-      const remuxResult = await remuxAndGenerateThumbnails(job, filePathFinal, {
-        downloadDir,
-        FFMPEG_PATH,
-        FFPROBE_PATH,
-        skipThumbnailGeneration: job.skipThumbnailGeneration !== false,
-      });
-      if (remuxResult && remuxResult.usedTsFallback && remuxResult.error) {
-        job.error = remuxResult.error;
-      }
+      job.segmentFiles = null;
 
       if (job.cancelled) {
         job.status = 'cancelled';

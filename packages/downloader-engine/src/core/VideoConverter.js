@@ -4,6 +4,87 @@ const { spawn } = require('child_process');
 const logger = require('../utils/logger');
 const { buildFfmpegMetadataArgs } = require('../utils/mediaTags');
 
+function escapeConcatEntry(filePath) {
+  return `file '${String(filePath || '').replace(/'/g, "'\\''")}'`;
+}
+
+function resolveRemuxInput(job, filePathFinal, outputDir) {
+  const segmentFiles = Array.isArray(job && job.segmentFiles)
+    ? job.segmentFiles.filter((entry) => typeof entry === 'string' && entry.trim())
+    : [];
+  if (segmentFiles.length > 1) {
+    return {
+      mode: 'concat',
+      entries: segmentFiles,
+      concatListPath: path.join(outputDir, `ts-segments-${job.id}.txt`),
+    };
+  }
+
+  const tsParts = Array.isArray(job && job.tsParts)
+    ? job.tsParts.filter((entry) => typeof entry === 'string' && entry.trim())
+    : [];
+  if (tsParts.length > 1) {
+    return {
+      mode: 'concat',
+      entries: tsParts,
+      concatListPath: path.join(outputDir, `ts-parts-${job.id}.txt`),
+    };
+  }
+
+  if (segmentFiles.length === 1) {
+    return { mode: 'single', inputPath: segmentFiles[0] };
+  }
+
+  return { mode: 'single', inputPath: filePathFinal };
+}
+
+function buildRemuxArgs({ job, input, mp4Path, withSubs }) {
+  const metadataArgs = buildFfmpegMetadataArgs(job);
+  const args = [
+    '-y',
+    '-fflags', '+genpts+discardcorrupt',
+    '-err_detect', 'ignore_err',
+  ];
+
+  if (input && input.mode === 'concat') {
+    args.push(
+      '-f', 'concat',
+      '-safe', '0',
+      '-i', input.concatListPath,
+    );
+  } else {
+    args.push('-i', input.inputPath);
+  }
+
+  if (withSubs) {
+    args.push('-i', job.subtitlePath);
+  }
+
+  if (withSubs) {
+    args.push('-map', '0:v', '-map', '0:a', '-map', '1:s');
+  } else {
+    args.push('-map', '0');
+  }
+
+  args.push(
+    '-c:v', 'copy',
+    '-c:a', 'copy',
+  );
+
+  if (withSubs) {
+    args.push('-c:s', 'mov_text');
+  }
+
+  args.push(
+    '-movflags', '+faststart',
+    '-max_interleave_delta', '0',
+    ...metadataArgs,
+    mp4Path,
+  );
+
+  return args;
+}
+
 async function remuxAndGenerateThumbnails(job, filePathFinal, {
   downloadDir,
   FFMPEG_PATH,
@@ -32,6 +113,7 @@ async function remuxAndGenerateThumbnails(job, filePathFinal, {
       throw new Error('FFmpeg not available');
     }
     const mp4Path = path.join(outputDir, `${job.id}-${job.downloadNameMp4}`);
+    const remuxInput = resolveRemuxInput(job, filePathFinal, outputDir);
 
     const hasSubtitle = (() => {
       if (!job.subtitlePath || !fs.existsSync(job.subtitlePath)) {
@@ -63,15 +145,14 @@ async function remuxAndGenerateThumbnails(job, filePathFinal, {
       }
     })();
 
-    const useConcatDemuxer = Array.isArray(job.tsParts) && job.tsParts.length > 1;
-
     logger.info('Starting TS->MP4 remux', {
       jobId: job.id,
       tsPath: filePathFinal,
+      segmentFiles: job.segmentFiles,
       tsParts: job.tsParts,
       mp4Path,
       ffmpegPath: FFMPEG_PATH,
-      useConcatDemuxer,
+      remuxInputMode: remuxInput.mode,
       hasSubtitle,
       subtitlePath: job.subtitlePath,
     });
@@ -80,51 +161,32 @@ async function remuxAndGenerateThumbnails(job, filePathFinal, {
       let args;
       let concatListPath = concatListPathRef || null;
 
-      if (useConcatDemuxer) {
-        const metadataArgs = buildFfmpegMetadataArgs(job);
+      if (remuxInput.mode === 'concat') {
         try {
-          concatListPath = concatListPath || path.join(outputDir, `ts-parts-${job.id}.txt`);
-          const listLines = job.tsParts.map(p => `file '${p.replace(/'/g, "'\\''")}'`).join('\n');
+          concatListPath = concatListPath || remuxInput.concatListPath;
+          const listLines = remuxInput.entries.map(escapeConcatEntry).join('\n');
           fs.writeFileSync(concatListPath, listLines, 'utf8');
         } catch (err) {
-          logger.warn('Failed to write concat list file for TS parts', {
+          logger.warn('Failed to write concat list file for remux input', {
             jobId: job.id,
             message: err && err.message,
           });
           reject(err);
           return;
         }
-
-        args = [
-          '-y',
-          '-fflags', '+discardcorrupt',
-          '-err_detect', 'ignore_err',
-          '-f', 'concat',
-          '-safe', '0',
-          '-i', concatListPath,
-          ...(withSubs ? ['-i', job.subtitlePath] : []),
-          ...(withSubs ? ['-map', '0:v', '-map', '0:a', '-map', '1:s'] : ['-map', '0']),
-          '-c:v', 'copy',
-          '-c:a', 'copy',
-          ...(withSubs ? ['-c:s', 'mov_text'] : []),
-          ...metadataArgs,
+        args = buildRemuxArgs({
+          job,
+          input: { ...remuxInput, concatListPath },
           mp4Path,
-        ];
+          withSubs,
+        });
       } else {
-        const metadataArgs = buildFfmpegMetadataArgs(job);
-        args = [
-          '-y',
-          '-fflags', '+discardcorrupt',
-          '-err_detect', 'ignore_err',
-          '-i', filePathFinal,
-          ...(withSubs ? ['-i', job.subtitlePath] : []),
-          ...(withSubs ? ['-map', '0:v', '-map', '0:a', '-map', '1:s'] : ['-map', '0']),
-          '-c:v', 'copy',
-          '-c:a', 'copy',
-          ...(withSubs ? ['-c:s', 'mov_text'] : []),
-          ...metadataArgs,
+        args = buildRemuxArgs({
+          job,
+          input: remuxInput,
           mp4Path,
-        ];
+          withSubs,
+        });
       }
 
       const stderrChunks = [];
@@ -393,4 +455,10 @@ async function remuxAndGenerateThumbnails(job, filePathFinal, {
   }
 }
 
-module.exports = { remuxAndGenerateThumbnails };
+module.exports = {
+  remuxAndGenerateThumbnails,
+  __test: {
+    buildRemuxArgs,
+    resolveRemuxInput,
+  },
+};

@@ -20,7 +20,7 @@
     "lint": "eslint . --ext .js,.jsx,.ts,.tsx --cache --cache-location .eslintcache",
     "lint:fix": "npm run lint -- --fix",
     "typecheck:desktop": "tsc --noEmit --project apps/desktop/tsconfig.json",
-    "test": "node --test --test-force-exit tests/api.integration.test.js tests/extension-title-inference.test.js tests/extension-stream-player.test.js tests/plex-metadata.test.js",
+    "test": "node --test --test-force-exit tests/api.integration.test.js tests/extension-title-inference.test.js tests/extension-stream-player.test.js tests/hls-remux-args.test.js tests/plex-metadata.test.js",
     "test:e2e": "playwright test"
   },
   "devDependencies": {
