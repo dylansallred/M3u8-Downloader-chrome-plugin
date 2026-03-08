@@ -66,10 +66,35 @@ test('remux args enable timestamp regeneration for concat inputs', () => {
   assert.ok(args.includes('+genpts+discardcorrupt'));
   assert.ok(args.includes('-f'));
   assert.ok(args.includes('concat'));
+  const mapIndexes = args
+    .map((value, index) => (value === '-map' ? args[index + 1] : null))
+    .filter(Boolean);
+  assert.deepEqual(mapIndexes, ['0:v?', '0:a?']);
   assert.ok(args.includes('-max_interleave_delta'));
   assert.ok(args.includes('0'));
   assert.ok(args.includes('-movflags'));
   assert.ok(args.includes('+faststart'));
+});
+
+test('remux args exclude timed_id3-style data streams even when subtitles are embedded separately', () => {
+  const args = __test.buildRemuxArgs({
+    job: {
+      id: 'job-subs',
+      subtitlePath: '/downloads/job-subs.srt',
+    },
+    input: {
+      mode: 'single',
+      inputPath: '/downloads/job-subs.ts',
+    },
+    mp4Path: '/downloads/job-subs.mp4',
+    withSubs: true,
+  });
+
+  const mapIndexes = args
+    .map((value, index) => (value === '-map' ? args[index + 1] : null))
+    .filter(Boolean);
+
+  assert.deepEqual(mapIndexes, ['0:v?', '0:a?', '1:s']);
 });
 
 test('playback compatibility args re-encode HLS outputs with audio resync', () => {

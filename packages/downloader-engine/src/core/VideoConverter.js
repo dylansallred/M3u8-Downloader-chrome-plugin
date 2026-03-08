@@ -60,10 +60,10 @@ function buildRemuxArgs({ job, input, mp4Path, withSubs }) {
     args.push('-i', job.subtitlePath);
   }
 
+  args.push('-map', '0:v?', '-map', '0:a?');
+
   if (withSubs) {
-    args.push('-map', '0:v', '-map', '0:a', '-map', '1:s');
-  } else {
-    args.push('-map', '0');
+    args.push('-map', '1:s');
   }
 
   args.push(
