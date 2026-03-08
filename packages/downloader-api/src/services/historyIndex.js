@@ -1,6 +1,13 @@
 const fs = require('fs');
 const path = require('path');
-const { buildDownloadAssetUrl, normalizeRelativePath, resolveDownloadPath, toPosixPath } = require('../utils/downloadPaths');
+const {
+  buildDownloadAssetUrl,
+  decodeExternalDownloadPath,
+  EXTERNAL_DOWNLOAD_PREFIX,
+  normalizeRelativePath,
+  resolveDownloadPath,
+  toPosixPath,
+} = require('../utils/downloadPaths');
 
 const INDEX_VERSION = 2;
 const DEFAULT_LIMIT = 200;
@@ -407,8 +414,8 @@ class HistoryIndexService {
     for (const thumbName of localThumbCandidates) {
       const sameDirPath = path.join(dirAbsolute, thumbName);
       if (fs.existsSync(sameDirPath)) {
-        const thumbRelative = dirRelative ? `${dirRelative}/${thumbName}` : thumbName;
-        return `/downloads/${toPosixPath(thumbRelative)}`;
+        const url = buildDownloadAssetUrl(this.downloadDir, sameDirPath);
+        if (url) return url;
       }
 
       const legacyPath = path.join(this.downloadDir, thumbName);
@@ -447,6 +454,12 @@ class HistoryIndexService {
         const resolved = resolveDownloadPath(this.downloadDir, relative);
         if (resolved && fs.existsSync(resolved)) {
           return `/downloads/${toPosixPath(relative)}`;
+        }
+      }
+      if (value.startsWith(EXTERNAL_DOWNLOAD_PREFIX)) {
+        const decoded = decodeExternalDownloadPath(value.slice(EXTERNAL_DOWNLOAD_PREFIX.length));
+        if (decoded && fs.existsSync(decoded)) {
+          return value;
         }
       }
     }

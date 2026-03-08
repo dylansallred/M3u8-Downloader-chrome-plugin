@@ -1,4 +1,5 @@
 const path = require('path');
+const EXTERNAL_DOWNLOAD_PREFIX = '/downloads/__external__/';
 
 function toPosixPath(value) {
   return String(value || '').replace(/\\/g, '/');
@@ -28,12 +29,34 @@ function isInsideDirectory(rootDir, absolutePath) {
   return !!relative && !relative.startsWith('..') && !path.isAbsolute(relative);
 }
 
+function encodeExternalDownloadPath(absolutePath) {
+  const source = String(absolutePath || '').trim();
+  if (!source) return '';
+  return Buffer.from(source, 'utf8').toString('base64url');
+}
+
+function decodeExternalDownloadPath(value) {
+  const encoded = String(value || '').trim();
+  if (!encoded) return '';
+  try {
+    const decoded = Buffer.from(encoded, 'base64url').toString('utf8');
+    if (Buffer.from(decoded, 'utf8').toString('base64url') !== encoded) {
+      return '';
+    }
+    const resolved = path.resolve(decoded);
+    return path.isAbsolute(resolved) ? resolved : '';
+  } catch {
+    return '';
+  }
+}
+
 function buildDownloadAssetUrl(downloadDir, absolutePath) {
   if (typeof absolutePath !== 'string' || !absolutePath.trim()) return null;
   const resolvedRoot = path.resolve(downloadDir);
   const resolvedTarget = path.resolve(absolutePath);
   if (!isInsideDirectory(resolvedRoot, resolvedTarget)) {
-    return `/downloads/${path.basename(resolvedTarget)}`;
+    const encoded = encodeExternalDownloadPath(resolvedTarget);
+    return encoded ? `${EXTERNAL_DOWNLOAD_PREFIX}${encoded}` : null;
   }
   const relative = toPosixPath(path.relative(resolvedRoot, resolvedTarget));
   return `/downloads/${relative}`;
@@ -52,6 +75,10 @@ function resolveDownloadPath(downloadDir, relativePath) {
 module.exports = {
   buildDownloadAssetUrl,
   buildJobStorageDir,
+  decodeExternalDownloadPath,
+  encodeExternalDownloadPath,
+  EXTERNAL_DOWNLOAD_PREFIX,
+  isInsideDirectory,
   normalizeRelativePath,
   resolveDownloadPath,
   safeJobIdSegment,

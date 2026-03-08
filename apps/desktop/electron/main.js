@@ -15,6 +15,8 @@ let updaterInstallRequested = false;
 const apiHost = process.env.M3U8_API_HOST || API.host;
 const apiPort = Number(process.env.M3U8_API_PORT || API.port);
 const UPDATER_CHECK_TIMEOUT_MS = 45_000;
+const UPDATER_STARTUP_CHECK_DELAY_MS = 3_000;
+const UPDATER_PERIODIC_CHECK_MS = 6 * 60 * 60 * 1000;
 
 const updaterState = {
   phase: 'idle',
@@ -448,14 +450,33 @@ function normalizeReleaseNotes(updateInfo) {
   return [];
 }
 
+function focusMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.isMinimized()) {
+    mainWindow.restore();
+  }
+  mainWindow.show();
+  mainWindow.focus();
+}
+
+function summarizeReleaseNote(updateInfo) {
+  const firstNote = normalizeReleaseNotes(updateInfo)[0];
+  if (!firstNote) return '';
+  return firstNote.replace(/\s+/g, ' ').trim().slice(0, 140);
+}
+
 function showUpdateNotification(title, body) {
   try {
     if (!Notification || !Notification.isSupported()) return;
-    new Notification({
+    const notification = new Notification({
       title,
       body,
       silent: false,
-    }).show();
+    });
+    notification.on('click', () => {
+      focusMainWindow();
+    });
+    notification.show();
   } catch {
     // Notification delivery is best-effort.
   }
@@ -551,9 +572,13 @@ function configureAutoUpdater() {
     updaterState.error = null;
     updaterState.currentVersion = app.getVersion();
     sendToRenderer('updater:event', updaterState);
+    const currentVersion = app.getVersion();
+    const releaseNoteSummary = summarizeReleaseNote(info);
     showUpdateNotification(
-      'VidSnag update available',
-      `Version ${info.version} is available and is downloading now.`,
+      `VidSnag ${info.version} is downloading`,
+      releaseNoteSummary
+        ? `Current version: ${currentVersion}. Downloading in the background. ${releaseNoteSummary}`
+        : `Current version: ${currentVersion}. Downloading in the background now.`,
     );
   });
 
@@ -601,9 +626,12 @@ function configureAutoUpdater() {
     updaterState.error = null;
     updaterState.currentVersion = app.getVersion();
     sendToRenderer('updater:event', updaterState);
+    const releaseNoteSummary = summarizeReleaseNote(info);
     showUpdateNotification(
-      'VidSnag update ready',
-      `Version ${info.version} has been downloaded. Restart the app to install it.`,
+      `VidSnag ${info.version} is ready`,
+      releaseNoteSummary
+        ? `Restart VidSnag to install. ${releaseNoteSummary}`
+        : 'Restart VidSnag to install this update.',
     );
   });
 
@@ -1160,11 +1188,11 @@ async function bootstrap() {
   } else if (settings.checkUpdatesOnStartup !== false) {
     setTimeout(() => {
       checkForUpdatesNow();
-    }, 15_000);
+    }, UPDATER_STARTUP_CHECK_DELAY_MS);
 
     updaterTimer = setInterval(() => {
       checkForUpdatesNow();
-    }, 6 * 60 * 60 * 1000);
+    }, UPDATER_PERIODIC_CHECK_MS);
   }
 
   app.on('activate', () => {

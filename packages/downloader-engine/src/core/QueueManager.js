@@ -191,6 +191,12 @@ class QueueManager {
     return safeName;
   }
 
+  buildCompletedArtifactFolderName(preferredBaseName) {
+    const ext = path.extname(preferredBaseName || '');
+    const baseName = ext ? String(preferredBaseName || '').slice(0, -ext.length) : String(preferredBaseName || '');
+    return this.sanitizeFinalFileName(baseName || 'Download').replace(/\.[ ]*$/g, '') || 'Download';
+  }
+
   resolveUniqueOutputPath(targetDir, fileName) {
     const ext = path.extname(fileName);
     const base = ext ? fileName.slice(0, -ext.length) : fileName;
@@ -232,12 +238,13 @@ class QueueManager {
     const primaryPath = job.mp4Path && fs.existsSync(job.mp4Path) ? job.mp4Path : job.filePath;
     if (!primaryPath || !fs.existsSync(primaryPath)) return;
 
-    const preferredDir = this.getCompletedOutputDir ? String(this.getCompletedOutputDir() || '').trim() : '';
-    const targetDir = preferredDir || path.dirname(primaryPath);
-    if (!targetDir) return;
-
     const ext = path.extname(primaryPath) || (job.mp4Path ? '.mp4' : '');
     const preferredBaseName = this.sanitizeFinalFileName(buildPlexBaseName(job), ext);
+    const preferredDir = this.getCompletedOutputDir ? String(this.getCompletedOutputDir() || '').trim() : '';
+    const targetDir = preferredDir
+      ? path.join(preferredDir, this.buildCompletedArtifactFolderName(preferredBaseName))
+      : path.dirname(primaryPath);
+    if (!targetDir) return;
 
     try {
       fs.mkdirSync(targetDir, { recursive: true });
@@ -481,7 +488,7 @@ class QueueManager {
         return `/downloads/${relative.replace(/\\/g, '/')}`;
       }
 
-      return `/downloads/${path.basename(candidatePath)}`;
+      return null;
     };
 
     const localThumbs = Array.isArray(job.thumbnailPaths)

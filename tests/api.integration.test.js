@@ -1001,7 +1001,7 @@ test('removing a completed queue item does not remove external history entries',
     const historyItemBeforeDelete = historyBeforeDelete.data.items.find((entry) => entry.jobId === jobId);
     assert.ok(historyItemBeforeDelete);
     assert.equal(fs.existsSync(historyItemBeforeDelete.absolutePath), true);
-    assert.equal(path.dirname(historyItemBeforeDelete.absolutePath), externalCompletedDir);
+    assert.equal(path.dirname(path.dirname(historyItemBeforeDelete.absolutePath)), externalCompletedDir);
     assert.equal(
       historyBeforeDelete.data.items.filter((entry) => entry.absolutePath === historyItemBeforeDelete.absolutePath).length,
       1,
@@ -1163,10 +1163,12 @@ test('relocateCompletedArtifact moves thumbnail and subtitle sidecars with the c
 
   queueManager.relocateCompletedArtifact(job);
 
-  assert.equal(path.dirname(job.filePath), externalCompletedDir);
-  assert.equal(path.dirname(job.thumbnailPath), externalCompletedDir);
-  assert.equal(path.dirname(job.subtitlePath), externalCompletedDir);
-  assert.equal(path.dirname(job.subtitleZipPath), externalCompletedDir);
+  const completedFolder = path.dirname(job.filePath);
+  assert.equal(path.dirname(completedFolder), externalCompletedDir);
+  assert.equal(path.dirname(job.thumbnailPath), completedFolder);
+  assert.equal(path.dirname(job.subtitlePath), completedFolder);
+  assert.equal(path.dirname(job.subtitleZipPath), completedFolder);
+  assert.equal(path.basename(completedFolder), 'Movie');
   assert.equal(fs.existsSync(job.filePath), true);
   assert.equal(fs.existsSync(job.thumbnailPath), true);
   assert.equal(fs.existsSync(job.subtitlePath), true);
@@ -1175,6 +1177,71 @@ test('relocateCompletedArtifact moves thumbnail and subtitle sidecars with the c
   assert.equal(fs.existsSync(thumbPath), false);
   assert.equal(fs.existsSync(subtitlePath), false);
   assert.equal(fs.existsSync(subtitleZipPath), false);
+});
+
+test('history serves external thumbnail sidecars from the configured output directory', async () => {
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'm3u8-tests-external-thumbs-'));
+  const port = await getFreePort();
+  const baseUrl = `http://127.0.0.1:${port}`;
+  const downloadDir = path.join(tmpRoot, 'downloads');
+  const externalCompletedDir = path.join(tmpRoot, 'external-output');
+  const itemDir = path.join(externalCompletedDir, 'Movie');
+  fs.mkdirSync(downloadDir, { recursive: true });
+  fs.mkdirSync(itemDir, { recursive: true });
+
+  const jobId = 'job-external-thumb';
+  const mediaPath = path.join(itemDir, 'Movie.mp4');
+  const thumbPath = path.join(itemDir, `${jobId}-thumb.jpg`);
+  fs.writeFileSync(mediaPath, Buffer.from('video'));
+  fs.writeFileSync(thumbPath, Buffer.from([0xff, 0xd8, 0xff, 0xd9]));
+
+  const queueFilePath = path.join(downloadDir, 'queue.json');
+  fs.writeFileSync(queueFilePath, JSON.stringify({
+    queue: [{
+      id: jobId,
+      title: 'Movie',
+      filePath: mediaPath,
+      mp4Path: mediaPath,
+      storageDir: itemDir,
+      thumbnailPath: thumbPath,
+      thumbnailPaths: [thumbPath],
+      downloadName: path.basename(mediaPath),
+      downloadNameMp4: path.basename(mediaPath),
+      status: 'completed',
+      queueStatus: 'completed',
+      completedAt: Date.now(),
+      updatedAt: Date.now(),
+    }],
+    settings: {
+      maxConcurrent: 1,
+      autoStart: true,
+    },
+  }, null, 2), 'utf8');
+
+  const apiServer = await startApi({
+    dataDir: tmpRoot,
+    port,
+    getCompletedOutputDir: () => externalCompletedDir,
+  });
+
+  try {
+    const historyRes = await waitFor(async () => {
+      const res = await apiFetch(baseUrl, '/api/history', { includeV1Headers: false });
+      const item = res.data.items.find((entry) => entry.jobId === jobId);
+      return item && item.thumbnailUrl ? res : false;
+    }, { timeoutMs: 5_000, intervalMs: 150 });
+
+    const historyItem = historyRes.data.items.find((entry) => entry.jobId === jobId);
+    assert.ok(historyItem);
+    assert.match(historyItem.thumbnailUrl, /^\/downloads\/__external__\//);
+
+    const thumbRes = await fetch(`${baseUrl}${historyItem.thumbnailUrl}`);
+    assert.equal(thumbRes.status, 200);
+    const thumbBytes = Buffer.from(await thumbRes.arrayBuffer());
+    assert.deepEqual(thumbBytes, Buffer.from([0xff, 0xd8, 0xff, 0xd9]));
+  } finally {
+    await apiServer.stop();
+  }
 });
 
 test('history items keep unique ids for duplicate basenames and delete resolves the requested file', async () => {

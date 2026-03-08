@@ -22,7 +22,13 @@ const { HistoryIndexService } = require('./services/historyIndex');
 const logger = require('./utils/logger');
 const { inferMediaMetadata } = require('./utils/mediaMetadata');
 const { lookupPoster } = require('./services/tmdb');
-const { buildDownloadAssetUrl, buildJobStorageDir } = require('./utils/downloadPaths');
+const {
+  buildDownloadAssetUrl,
+  buildJobStorageDir,
+  decodeExternalDownloadPath,
+  EXTERNAL_DOWNLOAD_PREFIX,
+  isInsideDirectory,
+} = require('./utils/downloadPaths');
 const appConfig = require('./config');
 
 const TMDB_CACHE_VERSION = 1;
@@ -327,6 +333,59 @@ function createApiServer(options = {}) {
     fsPromises,
     jobs,
     onChange: (payload) => notifyHistoryChange(payload),
+  });
+
+  function isKnownManagedAssetPath(candidatePath) {
+    if (typeof candidatePath !== 'string' || !candidatePath.trim()) return false;
+    const resolvedCandidate = path.resolve(candidatePath);
+
+    if (isInsideDirectory(path.resolve(resolvedDownloadDir), resolvedCandidate)) {
+      return true;
+    }
+
+    const completedOutputDir = typeof getCompletedOutputDir === 'function'
+      ? String(getCompletedOutputDir() || '').trim()
+      : '';
+    if (completedOutputDir && isInsideDirectory(path.resolve(completedOutputDir), resolvedCandidate)) {
+      return true;
+    }
+
+    for (const job of jobs.values()) {
+      if (!job) continue;
+      const candidates = [
+        job.filePath,
+        job.mp4Path,
+        job.outputPath,
+        job.thumbnailPath,
+        job.subtitlePath,
+        job.subtitleZipPath,
+      ];
+      if (Array.isArray(job.thumbnailPaths)) {
+        candidates.push(...job.thumbnailPaths);
+      }
+      if (candidates.some((value) => typeof value === 'string' && path.resolve(value) === resolvedCandidate)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  app.get(`${EXTERNAL_DOWNLOAD_PREFIX}:encodedPath`, (req, res, next) => {
+    const resolvedAssetPath = decodeExternalDownloadPath(req.params.encodedPath);
+    if (!resolvedAssetPath || !isKnownManagedAssetPath(resolvedAssetPath)) {
+      next();
+      return;
+    }
+    if (!fs.existsSync(resolvedAssetPath)) {
+      next();
+      return;
+    }
+    res.sendFile(resolvedAssetPath, (err) => {
+      if (err && !res.headersSent) {
+        next(err);
+      }
+    });
   });
 
   function mergeThumbnailUrls(job) {
