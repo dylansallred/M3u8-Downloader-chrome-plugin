@@ -1,6 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-const { buildDownloadAssetUrl, normalizeRelativePath, toPosixPath } = require('../utils/downloadPaths');
+const { buildDownloadAssetUrl, normalizeRelativePath, resolveDownloadPath, toPosixPath } = require('../utils/downloadPaths');
 
 const INDEX_VERSION = 2;
 const DEFAULT_LIMIT = 200;
@@ -117,7 +117,7 @@ function mergeHistoryItems(existingItem, incomingItem) {
     sizeBytes: Number(existingItem.sizeBytes || incomingItem.sizeBytes || 0),
     modifiedAt: Math.max(Number(existingItem.modifiedAt || 0), Number(incomingItem.modifiedAt || 0)),
     ext: existingItem.ext || incomingItem.ext,
-    thumbnailUrl: existingItem.thumbnailUrl || incomingItem.thumbnailUrl,
+    thumbnailUrl: incomingItem.thumbnailUrl || existingItem.thumbnailUrl,
     tmdbReleaseDate: existingItem.tmdbReleaseDate || incomingItem.tmdbReleaseDate || null,
     tmdbMetadata: existingItem.tmdbMetadata || incomingItem.tmdbMetadata || null,
     youtubeMetadata: existingItem.youtubeMetadata || incomingItem.youtubeMetadata || null,
@@ -395,7 +395,7 @@ class HistoryIndexService {
     return files;
   }
 
-  findThumbnailUrl({ validJobId, dirAbsolute, dirRelative, job }) {
+  findThumbnailUrl({ validJobId, dirAbsolute, dirRelative, job, persistedItem }) {
     const localThumbCandidates = [];
     if (validJobId) {
       localThumbCandidates.push(`${validJobId}-thumb.jpg`);
@@ -417,12 +417,37 @@ class HistoryIndexService {
       }
     }
 
+    if (job && typeof job.thumbnailPath === 'string' && job.thumbnailPath.trim() && fs.existsSync(job.thumbnailPath)) {
+      const url = buildDownloadAssetUrl(this.downloadDir, job.thumbnailPath);
+      if (url) return url;
+    }
+
     if (job && Array.isArray(job.thumbnailPaths)) {
       for (const thumbPath of job.thumbnailPaths) {
         if (typeof thumbPath !== 'string') continue;
         if (!fs.existsSync(thumbPath)) continue;
         const url = buildDownloadAssetUrl(this.downloadDir, thumbPath);
         if (url) return url;
+      }
+    }
+
+    const persistedThumbCandidates = [];
+    if (persistedItem && typeof persistedItem.thumbnailUrl === 'string') {
+      persistedThumbCandidates.push(persistedItem.thumbnailUrl);
+    }
+
+    for (const candidate of persistedThumbCandidates) {
+      const value = String(candidate || '').trim();
+      if (!value) continue;
+      if (/^https?:\/\//i.test(value)) {
+        return value;
+      }
+      if (value.startsWith('/downloads/')) {
+        const relative = value.slice('/downloads/'.length);
+        const resolved = resolveDownloadPath(this.downloadDir, relative);
+        if (resolved && fs.existsSync(resolved)) {
+          return `/downloads/${toPosixPath(relative)}`;
+        }
       }
     }
 
@@ -478,6 +503,7 @@ class HistoryIndexService {
       dirAbsolute,
       dirRelative,
       job,
+      persistedItem,
     });
 
     return {
@@ -500,7 +526,7 @@ class HistoryIndexService {
 
   static buildSignature(items) {
     return items
-      .map((item) => `${item.absolutePath || item.relativePath || item.fileName}:${item.sizeBytes}:${item.modifiedAt}`)
+      .map((item) => `${item.absolutePath || item.relativePath || item.fileName}:${item.sizeBytes}:${item.modifiedAt}:${item.thumbnailUrl || ''}`)
       .join('|');
   }
 

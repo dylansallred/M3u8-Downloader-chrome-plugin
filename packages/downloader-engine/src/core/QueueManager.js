@@ -203,6 +203,29 @@ class QueueManager {
     return candidate;
   }
 
+  relocateSidecarArtifact(candidatePath, resolvedTargetDir) {
+    if (typeof candidatePath !== 'string' || !candidatePath.trim()) {
+      return candidatePath;
+    }
+
+    const resolvedCandidate = path.resolve(candidatePath);
+    if (!fs.existsSync(resolvedCandidate)) {
+      return candidatePath;
+    }
+
+    const currentBaseName = path.basename(resolvedCandidate);
+    let targetPath = path.join(resolvedTargetDir, currentBaseName);
+    if (targetPath !== resolvedCandidate && fs.existsSync(targetPath)) {
+      targetPath = this.resolveUniqueOutputPath(resolvedTargetDir, currentBaseName);
+    }
+
+    if (targetPath !== resolvedCandidate) {
+      fs.renameSync(resolvedCandidate, targetPath);
+    }
+
+    return targetPath;
+  }
+
   relocateCompletedArtifact(job) {
     if (!job) return;
 
@@ -252,8 +275,18 @@ class QueueManager {
         }
       }
 
+      job.thumbnailPath = this.relocateSidecarArtifact(job.thumbnailPath, resolvedTargetDir);
+      if (Array.isArray(job.thumbnailPaths)) {
+        job.thumbnailPaths = job.thumbnailPaths.map((thumbPath) =>
+          this.relocateSidecarArtifact(thumbPath, resolvedTargetDir)
+        );
+      }
+      job.subtitlePath = this.relocateSidecarArtifact(job.subtitlePath, resolvedTargetDir);
+      job.subtitleZipPath = this.relocateSidecarArtifact(job.subtitleZipPath, resolvedTargetDir);
+
       job.outputPath = targetPath;
       job.outputDirectory = path.dirname(targetPath);
+      job.storageDir = resolvedTargetDir;
       job.updatedAt = Date.now();
     } catch (err) {
       logger.warn('Failed to relocate completed artifact', {

@@ -21,6 +21,7 @@ if (process.env.TEST_VERBOSE !== '1') {
 
 const { createApiServer } = require('../packages/downloader-api/src');
 const { inferMediaMetadata } = require('../packages/downloader-api/src/utils/mediaMetadata');
+const QueueManager = require('../packages/downloader-engine/src/core/QueueManager');
 
 async function getFreePort() {
   return new Promise((resolve, reject) => {
@@ -157,6 +158,30 @@ async function startFixtureMediaServer() {
       return;
     }
 
+    if (pathname === '/partial-broken.m3u8') {
+      const base = `http://127.0.0.1:${port}`;
+      const playlist = [
+        '#EXTM3U',
+        '#EXT-X-VERSION:3',
+        '#EXT-X-TARGETDURATION:3',
+        '#EXTINF:3,',
+        `${base}/seg-1.ts`,
+        '#EXTINF:3,',
+        `${base}/missing-middle.ts`,
+        '#EXTINF:3,',
+        `${base}/seg-2.ts`,
+        '#EXT-X-ENDLIST',
+        '',
+      ].join('\n');
+
+      res.writeHead(200, {
+        'Content-Type': 'application/vnd.apple.mpegurl',
+        'Content-Length': Buffer.byteLength(playlist),
+      });
+      res.end(playlist);
+      return;
+    }
+
     if (pathname === '/nested/seg-redirect-1.ts' || pathname === '/nested/seg-redirect-2.ts') {
       const target = pathname.endsWith('1.ts') ? '/seg-1.ts' : '/seg-2.ts';
       res.writeHead(302, {
@@ -191,6 +216,12 @@ async function startFixtureMediaServer() {
     if (pathname === '/missing-seg.ts') {
       res.writeHead(404, { 'Content-Type': 'text/plain' });
       res.end('Missing segment');
+      return;
+    }
+
+    if (pathname === '/missing-middle.ts') {
+      res.writeHead(503, { 'Content-Type': 'text/plain' });
+      res.end('Temporary segment failure');
       return;
     }
 
@@ -795,6 +826,59 @@ test('hls job falls back to direct media URL when all segments fail', async () =
   }
 });
 
+test('hls job fails instead of emitting partial output when a required segment is missing', async () => {
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'm3u8-tests-partial-broken-'));
+  const port = await getFreePort();
+  const baseUrl = `http://127.0.0.1:${port}`;
+
+  const mediaServer = await startFixtureMediaServer();
+  const apiServer = await startApi({ dataDir: tmpRoot, port });
+
+  try {
+    const createRes = await apiFetch(baseUrl, '/v1/jobs', {
+      method: 'POST',
+      body: {
+        mediaUrl: `${mediaServer.baseUrl}/partial-broken.m3u8`,
+        mediaType: 'hls',
+        title: 'Partial Broken Job',
+        settings: {
+          maxSegmentAttempts: '2',
+        },
+      },
+    });
+    assert.equal(createRes.status, 200);
+
+    const jobId = createRes.data.jobId;
+    await waitForJobQueueState(baseUrl, jobId, 'failed', { timeoutMs: 12000, intervalMs: 200 });
+
+    const jobRes = await apiFetch(baseUrl, `/api/jobs/${jobId}`, { includeV1Headers: false });
+    assert.equal(jobRes.status, 200);
+    assert.equal(jobRes.data.status, 'error');
+    assert.equal(jobRes.data.failedSegments, 1);
+    assert.match(jobRes.data.error || '', /Incomplete HLS download/i);
+    assert.equal(jobRes.data.progress < 100, true);
+
+    const fileRes = await fetch(`${baseUrl}/api/jobs/${jobId}/file`);
+    assert.equal(fileRes.status, 400);
+
+    const downloadDir = path.join(tmpRoot, 'downloads');
+    const topLevelTsArtifacts = fs.existsSync(downloadDir)
+      ? fs.readdirSync(downloadDir, { withFileTypes: true })
+        .filter((entry) => entry.isFile())
+        .map((entry) => entry.name)
+        .filter((name) => name.startsWith(`${jobId}-`) && /[.]ts$/i.test(name))
+      : [];
+    assert.deepEqual(
+      topLevelTsArtifacts,
+      [],
+      'expected no finalized TS artifacts for incomplete HLS job'
+    );
+  } finally {
+    await apiServer.stop();
+    await mediaServer.close();
+  }
+});
+
 test('queue auto-start fills available concurrency slots up to maxConcurrent', async () => {
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'm3u8-tests-concurrency-'));
   const port = await getFreePort();
@@ -948,6 +1032,149 @@ test('removing a completed queue item does not remove external history entries',
     await apiServer.stop();
     await mediaServer.close();
   }
+});
+
+test('external history items keep their thumbnail after clearing completed queue jobs', async () => {
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'm3u8-tests-external-history-thumb-'));
+  const port = await getFreePort();
+  const baseUrl = `http://127.0.0.1:${port}`;
+  const externalCompletedDir = path.join(tmpRoot, 'plex-output');
+  const downloadDir = path.join(tmpRoot, 'downloads');
+
+  const mediaServer = await startFixtureMediaServer();
+  let apiServer = await startApi({
+    dataDir: tmpRoot,
+    port,
+    getCompletedOutputDir: () => externalCompletedDir,
+  });
+
+  try {
+    const createRes = await apiFetch(baseUrl, '/v1/jobs', {
+      method: 'POST',
+      body: {
+        mediaUrl: `${mediaServer.baseUrl}/sample.mp4`,
+        mediaType: 'file',
+        title: 'External History Thumbnail Job',
+      },
+    });
+    assert.equal(createRes.status, 200);
+    const jobId = createRes.data.jobId;
+
+    await waitFor(async () => {
+      const queueRes = await apiFetch(baseUrl, '/api/queue', { includeV1Headers: false });
+      const job = queueRes.data.queue.find((entry) => entry.id === jobId);
+      return job && job.queueStatus === 'completed' ? true : false;
+    }, { timeoutMs: 12_000, intervalMs: 200 });
+
+    await apiServer.stop();
+
+    const thumbDir = path.join(downloadDir, jobId);
+    const thumbPath = path.join(thumbDir, `${jobId}-thumb.jpg`);
+    fs.mkdirSync(thumbDir, { recursive: true });
+    fs.writeFileSync(thumbPath, Buffer.from([0xff, 0xd8, 0xff, 0xd9]));
+
+    const queueFilePath = path.join(downloadDir, 'queue.json');
+    const queuePayload = JSON.parse(fs.readFileSync(queueFilePath, 'utf8'));
+    const persistedJob = (queuePayload.queue || []).find((entry) => entry.id === jobId);
+    assert.ok(persistedJob);
+    persistedJob.thumbnailPath = thumbPath;
+    fs.writeFileSync(queueFilePath, JSON.stringify(queuePayload, null, 2), 'utf8');
+
+    apiServer = await startApi({
+      dataDir: tmpRoot,
+      port,
+      getCompletedOutputDir: () => externalCompletedDir,
+    });
+
+    const historyBeforeDelete = await waitFor(async () => {
+      const historyRes = await apiFetch(baseUrl, '/api/history', { includeV1Headers: false });
+      const item = historyRes.data.items.find((entry) => entry.jobId === jobId);
+      return item && item.thumbnailUrl ? historyRes : false;
+    }, { timeoutMs: 5_000, intervalMs: 200 });
+    assert.equal(historyBeforeDelete.status, 200);
+    const historyItemBeforeDelete = historyBeforeDelete.data.items.find((entry) => entry.jobId === jobId);
+    assert.ok(historyItemBeforeDelete);
+    assert.equal(historyItemBeforeDelete.thumbnailUrl, `/downloads/${jobId}/${jobId}-thumb.jpg`);
+
+    const clearRes = await apiFetch(baseUrl, '/api/queue/clear-completed', {
+      method: 'POST',
+      includeV1Headers: false,
+    });
+    assert.equal(clearRes.status, 200);
+
+    const historyAfterDelete = await waitFor(async () => {
+      const historyRes = await apiFetch(baseUrl, '/api/history', { includeV1Headers: false });
+      const item = historyRes.data.items.find((entry) => entry.absolutePath === historyItemBeforeDelete.absolutePath);
+      return item && item.thumbnailUrl ? historyRes : false;
+    }, { timeoutMs: 5_000, intervalMs: 200 });
+    assert.equal(historyAfterDelete.status, 200);
+    const historyItemAfterDelete = historyAfterDelete.data.items.find(
+      (entry) => entry.absolutePath === historyItemBeforeDelete.absolutePath
+    );
+    assert.ok(historyItemAfterDelete);
+    assert.equal(historyItemAfterDelete.thumbnailUrl, `/downloads/${jobId}/${jobId}-thumb.jpg`);
+  } finally {
+    await apiServer.stop();
+    await mediaServer.close();
+  }
+});
+
+test('relocateCompletedArtifact moves thumbnail and subtitle sidecars with the completed media', async () => {
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'm3u8-tests-relocate-sidecars-'));
+  const downloadDir = path.join(tmpRoot, 'downloads');
+  const externalCompletedDir = path.join(tmpRoot, 'external-output');
+  fs.mkdirSync(downloadDir, { recursive: true });
+  fs.mkdirSync(externalCompletedDir, { recursive: true });
+
+  const queueManager = new QueueManager({
+    queueFilePath: path.join(downloadDir, 'queue.json'),
+    fsPromises: fs.promises,
+    jobs: new Map(),
+    runJob: async () => {},
+    runDirectJob: async () => {},
+    getCompletedOutputDir: () => externalCompletedDir,
+  });
+
+  const jobId = 'job-relocate-sidecars';
+  const storageDir = path.join(downloadDir, jobId);
+  fs.mkdirSync(storageDir, { recursive: true });
+
+  const mediaPath = path.join(storageDir, `${jobId}-movie.mp4`);
+  const thumbPath = path.join(storageDir, `${jobId}-thumb.jpg`);
+  const subtitlePath = path.join(storageDir, `${jobId}-subtitles.srt`);
+  const subtitleZipPath = path.join(storageDir, `${jobId}-subtitles.zip`);
+  fs.writeFileSync(mediaPath, Buffer.from('video'));
+  fs.writeFileSync(thumbPath, Buffer.from([0xff, 0xd8, 0xff, 0xd9]));
+  fs.writeFileSync(subtitlePath, '1\n00:00:00,000 --> 00:00:01,000\nHello\n');
+  fs.writeFileSync(subtitleZipPath, Buffer.from('zip'));
+
+  const job = {
+    id: jobId,
+    title: 'Movie',
+    filePath: mediaPath,
+    mp4Path: mediaPath,
+    storageDir,
+    thumbnailPath: thumbPath,
+    subtitlePath,
+    subtitleZipPath,
+    downloadName: path.basename(mediaPath),
+    downloadNameMp4: path.basename(mediaPath),
+  };
+
+  queueManager.relocateCompletedArtifact(job);
+
+  assert.equal(path.dirname(job.filePath), externalCompletedDir);
+  assert.equal(path.dirname(job.thumbnailPath), externalCompletedDir);
+  assert.equal(path.dirname(job.subtitlePath), externalCompletedDir);
+  assert.equal(path.dirname(job.subtitleZipPath), externalCompletedDir);
+  assert.equal(fs.existsSync(job.filePath), true);
+  assert.equal(fs.existsSync(job.thumbnailPath), true);
+  assert.equal(fs.existsSync(job.subtitlePath), true);
+  assert.equal(fs.existsSync(job.subtitleZipPath), true);
+  assert.equal(fs.existsSync(mediaPath), false);
+  assert.equal(fs.existsSync(thumbPath), false);
+  assert.equal(fs.existsSync(subtitlePath), false);
+  assert.equal(fs.existsSync(subtitleZipPath), false);
 });
 
 test('history items keep unique ids for duplicate basenames and delete resolves the requested file', async () => {

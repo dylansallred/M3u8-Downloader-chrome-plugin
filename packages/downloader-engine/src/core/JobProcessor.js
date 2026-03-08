@@ -25,6 +25,33 @@ function createJobProcessor({
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
+  function summarizeSegmentIndexes(indexes, limit = 8) {
+    if (!Array.isArray(indexes) || indexes.length === 0) {
+      return '';
+    }
+    const normalized = indexes
+      .map((value) => Number.parseInt(value, 10))
+      .filter((value) => Number.isInteger(value) && value >= 0)
+      .sort((a, b) => a - b);
+
+    if (normalized.length === 0) {
+      return '';
+    }
+
+    const sample = normalized.slice(0, limit).join(', ');
+    if (normalized.length <= limit) {
+      return sample;
+    }
+    return `${sample} ...`;
+  }
+
+  function buildIncompleteHlsError(totalSegments, indexes, reason = 'missing or failed') {
+    const count = Array.isArray(indexes) ? indexes.length : 0;
+    const sample = summarizeSegmentIndexes(indexes);
+    const sampleSuffix = sample ? ` Segment indexes: ${sample}.` : '';
+    return `Incomplete HLS download: ${count} of ${totalSegments} segment(s) are ${reason}.${sampleSuffix}`;
+  }
+
   function isYouTubeUrl(value) {
     if (typeof value !== 'string' || !value.trim()) return false;
     try {
@@ -679,6 +706,7 @@ function createJobProcessor({
     let currentStream = null;
     let currentPartBytes = 0;
     let totalBytesWritten = 0;
+    const missingSegments = [];
 
     function openNextPartStream() {
       const basePath = job.filePath.replace(/\.ts$/i, '');
@@ -709,6 +737,7 @@ function createJobProcessor({
         try {
           await fsPromises.access(tempSegmentPath);
         } catch {
+          missingSegments.push(i);
           continue;
         }
 
@@ -721,6 +750,17 @@ function createJobProcessor({
             tempSegmentPath,
             message: err && err.message,
           });
+          missingSegments.push(i);
+          continue;
+        }
+
+        if (!stats || !Number.isFinite(stats.size) || stats.size <= 0) {
+          logger.warn('Temp segment missing content during concat', {
+            jobId: job.id,
+            tempSegmentPath,
+            size: stats && stats.size,
+          });
+          missingSegments.push(i);
           continue;
         }
 
@@ -757,6 +797,10 @@ function createJobProcessor({
         }
       }
 
+      if (missingSegments.length > 0) {
+        throw new Error(buildIncompleteHlsError(segments.length, missingSegments));
+      }
+
       if (!currentStream) {
         return tsParts;
       }
@@ -781,6 +825,14 @@ function createJobProcessor({
       if (currentStream) {
         currentStream.destroy();
       }
+      await Promise.all(
+        tsParts.map(async (partPath) => {
+          try {
+            await fsPromises.unlink(partPath);
+          } catch (_) {
+          }
+        })
+      );
       throw err;
     }
 
@@ -1100,9 +1152,23 @@ function createJobProcessor({
       // Index for new segments; failed segments are managed in a separate queue.
       let nextIndex = 0;
       const failedQueue = [];
+      const areAllSegmentsTerminal = () => {
+        for (let idx = 0; idx < segments.length; idx += 1) {
+          const state = job.segmentStates[idx];
+          if (!state) return false;
+          if (state.status !== 'completed' && state.status !== 'failed') {
+            return false;
+          }
+        }
+        return true;
+      };
 
       async function worker(workerId) {
         while (!job.cancelled) {
+          if (nextIndex >= segments.length && failedQueue.length === 0 && areAllSegmentsTerminal()) {
+            break;
+          }
+
           let i = null;
 
           // First exhaust all primary segments, then consume retries.
@@ -1159,6 +1225,10 @@ function createJobProcessor({
             }
 
             if (candidates.length === 0) {
+              if (areAllSegmentsTerminal()) {
+                break;
+              }
+
               // No immediate race work. If retries are scheduled for the future,
               // wait briefly and poll again instead of exiting early.
               if (failedQueue.length > 0) {
@@ -1426,6 +1496,18 @@ function createJobProcessor({
       }
       await Promise.all(workers);
 
+      const incompleteSegmentIndexes = [];
+      for (let i = 0; i < segments.length; i += 1) {
+        const state = job.segmentStates[i];
+        if (!state || state.status !== 'completed') {
+          incompleteSegmentIndexes.push(i);
+        }
+      }
+
+      if (!job.cancelled && incompleteSegmentIndexes.length > 0) {
+        throw new Error(buildIncompleteHlsError(segments.length, incompleteSegmentIndexes));
+      }
+
       if (job.cancelled) {
         const preserveSegmentsForPause = !!job.pauseRequested && !job.cleanupOnCancel;
         await cleanupCancelledHlsArtifacts(job, jobTempDir, { preserveSegments: preserveSegmentsForPause });
@@ -1504,7 +1586,13 @@ function createJobProcessor({
       } else if (remuxResult && remuxResult.usedTsFallback) {
         job.status = 'completed-with-errors';
       } else if (job.failedSegments.length > 0) {
-        job.status = 'completed-with-errors';
+        job.status = 'error';
+        if (!job.error) {
+          job.error = buildIncompleteHlsError(
+            job.totalSegments || job.failedSegments.length,
+            job.failedSegments.map((segment) => segment && segment.index)
+          );
+        }
       } else {
         job.status = 'completed';
         job.error = null;
