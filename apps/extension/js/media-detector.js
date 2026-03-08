@@ -148,9 +148,17 @@
 
   const originalFetch = window.fetch;
 
+  function resolveRequestUrl(request) {
+    if (typeof request === 'string') return request;
+    if (request instanceof URL) return request.toString();
+    if (request && typeof request.url === 'string') return request.url;
+    if (request && typeof request.href === 'string') return request.href;
+    return '';
+  }
+
   window.fetch = function(...args) {
     const request = args[0];
-    const url = typeof request === 'string' ? request : request.url;
+    const url = resolveRequestUrl(request);
     const options = args[1] || {};
 
     // Capture request headers

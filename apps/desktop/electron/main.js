@@ -9,9 +9,12 @@ let apiServer = null;
 let updaterTimer = null;
 let updaterReminderTimer = null;
 let updaterInstallTimer = null;
+let updaterCheckTimeout = null;
+let updaterCheckPromise = null;
 let updaterInstallRequested = false;
 const apiHost = process.env.M3U8_API_HOST || API.host;
 const apiPort = Number(process.env.M3U8_API_PORT || API.port);
+const UPDATER_CHECK_TIMEOUT_MS = 45_000;
 
 const updaterState = {
   phase: 'idle',
@@ -349,6 +352,13 @@ function clearUpdaterInstallTimer() {
   }
 }
 
+function clearUpdaterCheckTimeout() {
+  if (updaterCheckTimeout) {
+    clearTimeout(updaterCheckTimeout);
+    updaterCheckTimeout = null;
+  }
+}
+
 function isTranslocatedMacApp() {
   if (process.platform !== 'darwin') return false;
   try {
@@ -376,6 +386,48 @@ function isInstalledInApplicationsFolder() {
   } catch {
     return false;
   }
+}
+
+function getUpdaterSupportState() {
+  if (!app.isPackaged) {
+    return {
+      supported: false,
+      message: 'Updates are only available in installed app builds.',
+    };
+  }
+
+  if (isTranslocatedMacApp()) {
+    return {
+      supported: false,
+      message: 'Move the app to /Applications to enable updates.',
+    };
+  }
+
+  return { supported: true, message: '' };
+}
+
+function setUpdaterIdleState(message, extra = {}) {
+  updaterState.phase = 'idle';
+  updaterState.message = message;
+  updaterState.progress = 0;
+  updaterState.error = null;
+  updaterState.currentVersion = app.getVersion();
+  updaterState.deferredUntil = null;
+  updaterState.nextReminderAt = null;
+  updaterState.reminderIntervalMs = null;
+  Object.assign(updaterState, extra);
+  sendToRenderer('updater:event', updaterState);
+}
+
+function setUpdaterUnsupportedState(message) {
+  clearUpdaterReminderTimer();
+  clearUpdaterInstallTimer();
+  clearUpdaterCheckTimeout();
+  updaterCheckPromise = null;
+  setUpdaterIdleState(message, {
+    updateInfo: null,
+    releaseNotes: [],
+  });
 }
 
 function normalizeReleaseNotes(updateInfo) {
@@ -485,6 +537,7 @@ function configureAutoUpdater() {
   });
 
   autoUpdater.on('update-available', (info) => {
+    clearUpdaterCheckTimeout();
     clearUpdaterInstallTimer();
     updaterInstallRequested = false;
     clearUpdaterReminderTimer();
@@ -505,6 +558,7 @@ function configureAutoUpdater() {
   });
 
   autoUpdater.on('update-not-available', (info) => {
+    clearUpdaterCheckTimeout();
     clearUpdaterInstallTimer();
     updaterInstallRequested = false;
     clearUpdaterReminderTimer();
@@ -522,6 +576,7 @@ function configureAutoUpdater() {
   });
 
   autoUpdater.on('download-progress', (progress) => {
+    clearUpdaterCheckTimeout();
     updaterState.phase = 'downloading';
     updaterState.progress = Math.round(progress.percent || 0);
     updaterState.message = `Downloading update... ${updaterState.progress}%`;
@@ -531,6 +586,7 @@ function configureAutoUpdater() {
   });
 
   autoUpdater.on('update-downloaded', (info) => {
+    clearUpdaterCheckTimeout();
     clearUpdaterInstallTimer();
     updaterInstallRequested = false;
     clearUpdaterReminderTimer();
@@ -552,6 +608,7 @@ function configureAutoUpdater() {
   });
 
   autoUpdater.on('error', (error) => {
+    clearUpdaterCheckTimeout();
     clearUpdaterInstallTimer();
     updaterInstallRequested = false;
     clearUpdaterReminderTimer();
@@ -567,22 +624,79 @@ function configureAutoUpdater() {
 }
 
 async function checkForUpdatesNow() {
+  const support = getUpdaterSupportState();
+  if (!support.supported) {
+    setUpdaterUnsupportedState(support.message);
+    return { ok: false, unsupported: true, error: support.message };
+  }
+
+  if (updaterCheckPromise) {
+    return { ok: true, inFlight: true };
+  }
+
   updaterState.phase = 'checking';
   updaterState.message = 'Checking for updates...';
+  updaterState.progress = 0;
   updaterState.error = null;
   updaterState.currentVersion = app.getVersion();
   updaterState.lastCheckedAt = Date.now();
+  updaterState.deferredUntil = null;
+  updaterState.nextReminderAt = null;
+  updaterState.reminderIntervalMs = null;
   sendToRenderer('updater:event', updaterState);
-  try {
-    await autoUpdater.checkForUpdates();
-    return { ok: true };
-  } catch (err) {
-    updaterState.phase = 'error';
-    updaterState.message = 'Update check failed';
-    updaterState.error = String(err.message || err);
-    sendToRenderer('updater:event', updaterState);
-    return { ok: false, error: updaterState.error };
-  }
+
+  updaterCheckPromise = (async () => {
+    clearUpdaterCheckTimeout();
+    updaterCheckTimeout = setTimeout(() => {
+      updaterCheckTimeout = null;
+      if (updaterState.phase !== 'checking') return;
+      updaterState.phase = 'error';
+      updaterState.message = 'Update check timed out';
+      updaterState.error = 'The update service did not respond. Try again in a moment.';
+      updaterState.progress = 0;
+      updaterState.currentVersion = app.getVersion();
+      sendToRenderer('updater:event', updaterState);
+    }, UPDATER_CHECK_TIMEOUT_MS);
+
+    try {
+      const result = await autoUpdater.checkForUpdates();
+      if (updaterState.phase === 'checking') {
+        const nextVersion = result && result.updateInfo && result.updateInfo.version
+          ? String(result.updateInfo.version)
+          : '';
+        const hasNewVersion = nextVersion && nextVersion !== app.getVersion();
+        if (hasNewVersion) {
+          updaterState.phase = 'downloading';
+          updaterState.message = `Downloading version ${nextVersion}...`;
+          updaterState.updateInfo = result.updateInfo;
+          updaterState.releaseNotes = normalizeReleaseNotes(result.updateInfo);
+        } else {
+          updaterState.phase = 'idle';
+          updaterState.message = `You're up to date on version ${app.getVersion()}.`;
+          updaterState.updateInfo = result && result.updateInfo ? result.updateInfo : null;
+          updaterState.releaseNotes = normalizeReleaseNotes(result && result.updateInfo);
+        }
+        updaterState.progress = 0;
+        updaterState.error = null;
+        updaterState.currentVersion = app.getVersion();
+        sendToRenderer('updater:event', updaterState);
+      }
+      return { ok: true };
+    } catch (err) {
+      updaterState.phase = 'error';
+      updaterState.message = 'Update check failed';
+      updaterState.error = String(err.message || err);
+      updaterState.progress = 0;
+      updaterState.currentVersion = app.getVersion();
+      sendToRenderer('updater:event', updaterState);
+      return { ok: false, error: updaterState.error };
+    } finally {
+      clearUpdaterCheckTimeout();
+      updaterCheckPromise = null;
+    }
+  })();
+
+  return updaterCheckPromise;
 }
 
 async function startLocalApi() {
@@ -1037,7 +1151,10 @@ async function bootstrap() {
   createWindow();
 
   const settings = readSettings();
-  if (settings.checkUpdatesOnStartup !== false) {
+  const updaterSupport = getUpdaterSupportState();
+  if (!updaterSupport.supported) {
+    setUpdaterUnsupportedState(updaterSupport.message);
+  } else if (settings.checkUpdatesOnStartup !== false) {
     setTimeout(() => {
       checkForUpdatesNow();
     }, 15_000);
@@ -1062,6 +1179,7 @@ app.on('before-quit', async () => {
     updaterTimer = null;
   }
   clearUpdaterReminderTimer();
+  clearUpdaterCheckTimeout();
 
   if (apiServer) {
     try {

@@ -55,6 +55,14 @@ async function startFixtureMediaServer() {
       return;
     }
 
+    if (pathname === '/redirect-sample.mp4') {
+      res.writeHead(302, {
+        Location: '/sample.mp4',
+      });
+      res.end();
+      return;
+    }
+
     if (pathname === '/slow.m3u8') {
       setTimeout(() => {
         const base = `http://127.0.0.1:${port}`;
@@ -100,6 +108,35 @@ async function startFixtureMediaServer() {
       return;
     }
 
+    if (pathname === '/redirect-playlist.m3u8') {
+      res.writeHead(302, {
+        Location: '/nested/playlist.m3u8',
+      });
+      res.end();
+      return;
+    }
+
+    if (pathname === '/nested/playlist.m3u8') {
+      const playlist = [
+        '#EXTM3U',
+        '#EXT-X-VERSION:3',
+        '#EXT-X-TARGETDURATION:3',
+        '#EXTINF:3,',
+        'seg-redirect-1.ts',
+        '#EXTINF:3,',
+        'seg-redirect-2.ts',
+        '#EXT-X-ENDLIST',
+        '',
+      ].join('\n');
+
+      res.writeHead(200, {
+        'Content-Type': 'application/vnd.apple.mpegurl',
+        'Content-Length': Buffer.byteLength(playlist),
+      });
+      res.end(playlist);
+      return;
+    }
+
     if (pathname === '/broken.m3u8') {
       const base = `http://127.0.0.1:${port}`;
       const playlist = [
@@ -117,6 +154,15 @@ async function startFixtureMediaServer() {
         'Content-Length': Buffer.byteLength(playlist),
       });
       res.end(playlist);
+      return;
+    }
+
+    if (pathname === '/nested/seg-redirect-1.ts' || pathname === '/nested/seg-redirect-2.ts') {
+      const target = pathname.endsWith('1.ts') ? '/seg-1.ts' : '/seg-2.ts';
+      res.writeHead(302, {
+        Location: target,
+      });
+      res.end();
       return;
     }
 
@@ -531,6 +577,52 @@ test('v1 health, validation, queue lifecycle, and restart recovery', async () =>
     } catch {
       // ignore if already stopped
     }
+  }
+});
+
+test('direct and HLS jobs follow redirects for media downloads', async () => {
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'm3u8-tests-redirects-'));
+  const port = await getFreePort();
+  const baseUrl = `http://127.0.0.1:${port}`;
+
+  const mediaServer = await startFixtureMediaServer();
+  const apiServer = await startApi({ dataDir: tmpRoot, port });
+
+  try {
+    const directRes = await apiFetch(baseUrl, '/v1/jobs', {
+      method: 'POST',
+      body: {
+        mediaUrl: `${mediaServer.baseUrl}/redirect-sample.mp4`,
+        mediaType: 'file',
+        title: 'Redirected Direct Job',
+      },
+    });
+    assert.equal(directRes.status, 200);
+
+    const hlsRes = await apiFetch(baseUrl, '/v1/jobs', {
+      method: 'POST',
+      body: {
+        mediaUrl: `${mediaServer.baseUrl}/redirect-playlist.m3u8`,
+        mediaType: 'hls',
+        title: 'Redirected HLS Job',
+      },
+    });
+    assert.equal(hlsRes.status, 200);
+
+    await waitForJobQueueState(baseUrl, directRes.data.jobId, 'completed', { timeoutMs: 12_000, intervalMs: 200 });
+    await waitForJobQueueState(baseUrl, hlsRes.data.jobId, 'completed', { timeoutMs: 12_000, intervalMs: 200 });
+
+    const directJobRes = await apiFetch(baseUrl, `/api/jobs/${directRes.data.jobId}`, { includeV1Headers: false });
+    const hlsJobRes = await apiFetch(baseUrl, `/api/jobs/${hlsRes.data.jobId}`, { includeV1Headers: false });
+
+    assert.equal(directJobRes.status, 200);
+    assert.equal(hlsJobRes.status, 200);
+    assert.equal(directJobRes.data.status, 'completed');
+    assert.match(String(hlsJobRes.data.status || ''), /^completed/);
+    assert.equal(hlsJobRes.data.completedSegments, 2);
+  } finally {
+    await apiServer.stop();
+    await mediaServer.close();
   }
 });
 

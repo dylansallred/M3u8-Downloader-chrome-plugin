@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { spawn, spawnSync } = require('child_process');
-const { getClient, fetchText, parseM3U8 } = require('./PlaylistUtils');
+const { fetchText, parseM3U8, requestWithRedirects } = require('./PlaylistUtils');
 const { getRetryBackoffMs, downloadSegment } = require('./SegmentDownloader');
 const { remuxAndGenerateThumbnails } = require('./VideoConverter');
 const logger = require('../utils/logger');
@@ -827,9 +827,8 @@ function createJobProcessor({
           } catch (_) {
           }
 
-          const client = getClient(job.url);
-          await new Promise((resolve, reject) => {
-            const req = client.get(job.url, { headers }, (res) => {
+          await requestWithRedirects(job.url, headers, (res, _finalUrl, req) => {
+            return new Promise((resolve, reject) => {
               if (res.statusCode < 200 || res.statusCode >= 300) {
                 reject(new Error(`Request failed with status ${res.statusCode}`));
                 res.resume();
@@ -867,15 +866,7 @@ function createJobProcessor({
               outStream.on('finish', resolve);
               res.pipe(outStream);
             });
-
-            req.on('error', reject);
-
-            // Hard timeout to avoid hanging on bad connections.
-            const timeoutMs = 30_000;
-            req.setTimeout(timeoutMs, () => {
-              req.destroy(new Error(`Direct download timeout after ${timeoutMs} ms`));
-            });
-          });
+          }, { timeoutMs: 30_000 });
 
           await fsPromises.rename(tempFilePath, job.filePath);
           downloaded = true;
@@ -1034,8 +1025,8 @@ function createJobProcessor({
       }
 
       const headers = job.headers || {};
-      const playlistText = await fetchText(job.url, headers);
-      const segments = parseM3U8(playlistText, job.url);
+      const { text: playlistText, finalUrl: playlistUrl } = await fetchText(job.url, headers);
+      const segments = parseM3U8(playlistText, playlistUrl || job.url);
       job.totalSegments = segments.length;
       job.status = 'downloading';
       job.failedSegments = [];

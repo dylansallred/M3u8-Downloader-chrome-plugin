@@ -504,7 +504,8 @@ async function detectYoutubePageForTab(tabId, tabUrl, tabTitle = '') {
 
   const media = createYoutubePageMedia(safeTabId, tabUrl, tabTitle);
   if (!media) {
-    return { ok: true, ignored: true };
+    const cleared = await clearSyntheticYoutubePageMedia(safeTabId);
+    return { ok: true, ignored: true, ...cleared };
   }
 
   return storeMedia(safeTabId, media);
@@ -527,6 +528,71 @@ function isDirectFallbackCandidate(item) {
   return false;
 }
 
+function getUrlOrigin(rawUrl) {
+  try {
+    return new URL(String(rawUrl || '').trim()).origin;
+  } catch {
+    return '';
+  }
+}
+
+function pickFallbackUrlForItem(item, directCandidates) {
+  if (!item || item.type !== 'hls') {
+    return String(item && item.fallbackUrl || '').trim();
+  }
+
+  const existingFallbackUrl = String(item.fallbackUrl || '').trim();
+  const itemUrl = String(item.url || '').trim();
+  const itemSourcePageUrl = String(item.sourcePageUrl || '').trim();
+  const itemSourcePageTitle = String(item.sourcePageTitle || '').trim();
+  const itemOrigin = getUrlOrigin(itemUrl);
+  const itemDetectedAt = Number(item.detectedAt || 0) || 0;
+
+  let bestUrl = existingFallbackUrl;
+  let bestScore = -Infinity;
+
+  for (const candidate of Array.isArray(directCandidates) ? directCandidates : []) {
+    if (!candidate) continue;
+    const candidateUrl = String(candidate.url || '').trim();
+    if (!candidateUrl || candidateUrl === itemUrl) continue;
+
+    const candidateSourcePageUrl = String(candidate.sourcePageUrl || '').trim();
+    const candidateSourcePageTitle = String(candidate.sourcePageTitle || '').trim();
+    const candidateOrigin = getUrlOrigin(candidateUrl);
+    const candidateDetectedAt = Number(candidate.detectedAt || 0) || 0;
+
+    let score = 0;
+
+    if (itemSourcePageUrl && candidateSourcePageUrl && itemSourcePageUrl === candidateSourcePageUrl) {
+      score += 220;
+    }
+    if (itemOrigin && candidateOrigin && itemOrigin === candidateOrigin) {
+      score += 140;
+    }
+    if (itemSourcePageTitle && candidateSourcePageTitle && itemSourcePageTitle === candidateSourcePageTitle) {
+      score += 35;
+    }
+    if (!score) continue;
+
+    if (itemDetectedAt > 0 && candidateDetectedAt > 0) {
+      const deltaSeconds = Math.abs(candidateDetectedAt - itemDetectedAt) / 1000;
+      score += Math.max(0, 90 - Math.min(90, deltaSeconds));
+    }
+
+    const size = Number(candidate.contentLength || 0) || 0;
+    if (size > 0) {
+      score += Math.max(0, Math.min(40, Math.log2(size / 1024)));
+    }
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestUrl = candidateUrl;
+    }
+  }
+
+  return bestUrl;
+}
+
 function attachFallbackUrls(items) {
   if (!Array.isArray(items) || items.length === 0) return [];
 
@@ -540,14 +606,14 @@ function attachFallbackUrls(items) {
       return Number(b.detectedAt || 0) - Number(a.detectedAt || 0);
     });
 
-  const fallback = directCandidates[0] || null;
-  if (!fallback) return items;
+  if (directCandidates.length === 0) return items;
 
   return items.map((item) => {
     if (!item || item.type !== 'hls') return item;
+    const fallbackUrl = pickFallbackUrlForItem(item, directCandidates);
     return {
       ...item,
-      fallbackUrl: fallback.url,
+      fallbackUrl,
     };
   });
 }
@@ -672,6 +738,26 @@ async function removeMediaItem(tabId, itemId) {
   const next = existing.filter((item) => String(item && item.id || '') !== targetId);
   if (next.length === existing.length) {
     return { ok: false, error: 'Item not found', count: existing.length };
+  }
+
+  await chrome.storage.local.set({ [key]: next });
+  setBadge(tabId, next.length);
+  return { ok: true, removed: true, count: next.length };
+}
+
+function filterOutYoutubePageItems(items) {
+  return (Array.isArray(items) ? items : [])
+    .filter((item) => String(item && item.mediaKind || '').toLowerCase() !== 'youtube-page');
+}
+
+async function clearSyntheticYoutubePageMedia(tabId) {
+  const key = getStorageKey(tabId);
+  const current = await chrome.storage.local.get([key]);
+  const existing = Array.isArray(current[key]) ? current[key] : [];
+  const next = filterOutYoutubePageItems(existing);
+
+  if (next.length === existing.length) {
+    return { ok: true, removed: false, count: existing.length };
   }
 
   await chrome.storage.local.set({ [key]: next });

@@ -141,14 +141,6 @@ test('updates view reflects updater state transitions and enables install when d
         },
         remindLater: async () => {
           state.remindCalls += 1;
-          emit({
-            phase: 'downloaded',
-            message: 'Update deferred until 2099-01-01 00:30',
-            progress: 100,
-            deferredUntil: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
-            nextReminderAt: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
-            releaseNotes: ['Fix queue stability', 'Improve updater reminders'],
-          });
           return { ok: true };
         },
         onUpdaterEvent: (cb) => {
@@ -185,11 +177,8 @@ test('updates view reflects updater state transitions and enables install when d
 
     // Phase is shown as a Badge, not in a "Phase:" paragraph
     await expect(page.getByText('idle', { exact: true })).toBeVisible();
-    // Install and Later buttons are disabled when not in 'downloaded' phase
-    await expect(page.getByRole('button', { name: 'Install' })).toBeDisabled();
-    await expect(page.getByRole('button', { name: 'Later' })).toBeDisabled();
+    await expect(page.getByRole('button', { name: 'Restart & Install' })).toBeDisabled();
 
-    // Button is now named "Check" (not "Check for Updates")
     await page.getByRole('button', { name: 'Check' }).click();
     await expect(page.getByText('checking', { exact: true })).toBeVisible();
     await expect(page.getByText('Checking for updates...')).toBeVisible();
@@ -222,24 +211,12 @@ test('updates view reflects updater state transitions and enables install when d
       });
     });
     await expect(page.getByText('downloaded', { exact: true })).toBeVisible();
-    // Install and Later buttons are now enabled when phase is 'downloaded'
-    await expect(page.getByRole('button', { name: 'Install' })).toBeEnabled();
-    await expect(page.getByRole('button', { name: 'Later' })).toBeEnabled();
-    // Release notes use a collapsible "Show release notes" trigger
-    await expect(page.getByText('Show release notes')).toBeVisible();
-    await page.getByText('Show release notes').click();
-    await expect(page.getByText('Fix queue stability')).toBeVisible();
-
-    // Later button (not "Later (30m)")
-    await page.getByRole('button', { name: 'Later' }).click();
-    await expect(page.getByText('Deferred until:')).toBeVisible();
-
-    // Install button (not "Restart and Install")
-    await page.getByRole('button', { name: 'Install' }).click();
+    await expect(page.getByRole('button', { name: 'Restart & Install' })).toBeEnabled();
+    await page.getByRole('button', { name: 'Restart & Install' }).click();
     const harnessState = await page.evaluate(() => window.__desktopTestHarness.getState());
     expect(harnessState.checkCalls).toBe(1);
     expect(harnessState.installCalls).toBe(1);
-    expect(harnessState.remindCalls).toBe(1);
+    expect(harnessState.remindCalls).toBe(0);
   } finally {
     await renderer.close();
   }
