@@ -42,6 +42,8 @@ async function getFreePort() {
 
 async function startFixtureMediaServer() {
   const port = await getFreePort();
+  let exclusiveTailActive = 0;
+  let exclusiveTailCollision = false;
 
   const server = http.createServer((req, res) => {
     const pathname = new URL(req.url, `http://127.0.0.1:${port}`).pathname;
@@ -182,6 +184,32 @@ async function startFixtureMediaServer() {
       return;
     }
 
+    if (pathname === '/race-prevention.m3u8') {
+      const base = `http://127.0.0.1:${port}`;
+      const playlist = [
+        '#EXTM3U',
+        '#EXT-X-VERSION:3',
+        '#EXT-X-TARGETDURATION:3',
+        '#EXTINF:3,',
+        `${base}/seg-1.ts`,
+        '#EXTINF:3,',
+        `${base}/seg-2.ts`,
+        '#EXTINF:3,',
+        `${base}/seg-1.ts`,
+        '#EXTINF:3,',
+        `${base}/exclusive-tail.ts`,
+        '#EXT-X-ENDLIST',
+        '',
+      ].join('\n');
+
+      res.writeHead(200, {
+        'Content-Type': 'application/vnd.apple.mpegurl',
+        'Content-Length': Buffer.byteLength(playlist),
+      });
+      res.end(playlist);
+      return;
+    }
+
     if (pathname === '/nested/seg-redirect-1.ts' || pathname === '/nested/seg-redirect-2.ts') {
       const target = pathname.endsWith('1.ts') ? '/seg-1.ts' : '/seg-2.ts';
       res.writeHead(302, {
@@ -198,6 +226,35 @@ async function startFixtureMediaServer() {
         'Content-Length': body.length,
       });
       res.end(body);
+      return;
+    }
+
+    if (pathname === '/exclusive-tail.ts') {
+      exclusiveTailActive += 1;
+      if (exclusiveTailActive > 1) {
+        exclusiveTailCollision = true;
+      }
+
+      const body = Buffer.alloc(64 * 1024, 4);
+      setTimeout(() => {
+        const collided = exclusiveTailCollision;
+        exclusiveTailActive = Math.max(0, exclusiveTailActive - 1);
+        if (exclusiveTailActive === 0) {
+          exclusiveTailCollision = false;
+        }
+
+        if (collided) {
+          res.writeHead(503, { 'Content-Type': 'text/plain' });
+          res.end('Concurrent requests rejected');
+          return;
+        }
+
+        res.writeHead(200, {
+          'Content-Type': 'video/mp2t',
+          'Content-Length': body.length,
+        });
+        res.end(body);
+      }, 350);
       return;
     }
 
@@ -873,6 +930,44 @@ test('hls job fails instead of emitting partial output when a required segment i
       [],
       'expected no finalized TS artifacts for incomplete HLS job'
     );
+  } finally {
+    await apiServer.stop();
+    await mediaServer.close();
+  }
+});
+
+test('hls job does not race duplicate requests against an in-flight segment', async () => {
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'm3u8-tests-race-prevention-'));
+  const port = await getFreePort();
+  const baseUrl = `http://127.0.0.1:${port}`;
+
+  const mediaServer = await startFixtureMediaServer();
+  const apiServer = await startApi({ dataDir: tmpRoot, port });
+
+  try {
+    const createRes = await apiFetch(baseUrl, '/v1/jobs', {
+      method: 'POST',
+      body: {
+        mediaUrl: `${mediaServer.baseUrl}/race-prevention.m3u8`,
+        mediaType: 'hls',
+        title: 'Race Prevention Job',
+        settings: {
+          maxConcurrent: '4',
+          maxSegmentAttempts: '2',
+        },
+      },
+    });
+    assert.equal(createRes.status, 200);
+
+    const jobId = createRes.data.jobId;
+    await waitForJobQueueState(baseUrl, jobId, 'completed', { timeoutMs: 12_000, intervalMs: 200 });
+
+    const jobRes = await apiFetch(baseUrl, `/api/jobs/${jobId}`, { includeV1Headers: false });
+    assert.equal(jobRes.status, 200);
+    assert.notEqual(jobRes.data.status, 'error');
+    assert.equal(jobRes.data.failedSegments, 0);
+    assert.equal(jobRes.data.progress, 100);
+    assert.doesNotMatch(jobRes.data.error || '', /Incomplete HLS download/i);
   } finally {
     await apiServer.stop();
     await mediaServer.close();

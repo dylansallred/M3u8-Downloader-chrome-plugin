@@ -1388,7 +1388,7 @@ function createJobProcessor({
       // Track when a segment is next eligible to be retried (for backoff).
       const nextAttemptAt = new Array(segments.length).fill(0);
 
-      // Pre-compute maximum attempts allowed per segment (including racing).
+      // Pre-compute maximum attempts allowed per segment.
       const maxAttemptsPerSegment =
         job.maxSegmentAttempts === Infinity
           ? Infinity
@@ -1412,6 +1412,15 @@ function createJobProcessor({
           }
         }
         return true;
+      };
+      const hasActiveSegmentDownloads = () => {
+        for (let idx = 0; idx < segments.length; idx += 1) {
+          const state = job.segmentStates[idx];
+          if (state && state.status === 'downloading') {
+            return true;
+          }
+        }
+        return false;
       };
 
       async function worker(workerId) {
@@ -1460,56 +1469,41 @@ function createJobProcessor({
             }
           }
 
-          // If we didn't pick a primary or queued retry segment, allow this
-          // idle worker to "race" only on actively downloading segments.
-          // Backoff-managed retries stay in failedQueue until due.
           if (i == null) {
-            const candidates = [];
-            for (let idx = 0; idx < segments.length; idx++) {
-              const state = job.segmentStates[idx];
-              if (!state) continue;
-              if (state.status === 'downloading') {
-                if (attempts[idx] < effectiveMaxAttemptsPerSegment) {
-                  candidates.push(idx);
-                }
-              }
-            }
-
-            if (candidates.length === 0) {
-              if (areAllSegmentsTerminal()) {
-                break;
-              }
-
-              // No immediate race work. If retries are scheduled for the future,
-              // wait briefly and poll again instead of exiting early.
-              if (failedQueue.length > 0) {
-                const now = Date.now();
-                let nextDueAt = Infinity;
-
-                for (const segIdx of failedQueue) {
-                  const dueAt = nextAttemptAt[segIdx] || 0;
-                  if (dueAt > now && dueAt < nextDueAt) {
-                    nextDueAt = dueAt;
-                  }
-                }
-
-                if (Number.isFinite(nextDueAt)) {
-                  const waitMs = Math.max(25, Math.min(300, nextDueAt - now));
-                  await sleep(waitMs);
-                } else {
-                  await sleep(25);
-                }
-                continue;
-              }
-
-              // Nothing left to do for this worker.
+            if (areAllSegmentsTerminal()) {
               break;
             }
 
-            // Simple strategy: focus on the "hardest" segments by preferring
-            // those with the highest current attempt count.
-            candidates.sort((a, b) => attempts[b] - attempts[a]);
-            i = candidates[0];
+            // Another worker is already downloading the remaining in-flight work.
+            // Wait for it to complete or fail instead of spending more attempts on
+            // the same segment in parallel.
+            if (hasActiveSegmentDownloads()) {
+              await sleep(25);
+              continue;
+            }
+
+            if (failedQueue.length > 0) {
+              const now = Date.now();
+              let nextDueAt = Infinity;
+
+              for (const segIdx of failedQueue) {
+                const dueAt = nextAttemptAt[segIdx] || 0;
+                if (dueAt > now && dueAt < nextDueAt) {
+                  nextDueAt = dueAt;
+                }
+              }
+
+              if (Number.isFinite(nextDueAt)) {
+                const waitMs = Math.max(25, Math.min(300, nextDueAt - now));
+                await sleep(waitMs);
+              } else {
+                await sleep(25);
+              }
+              continue;
+            }
+
+            // Nothing left to do for this worker.
+            break;
           }
 
           const segmentUrl = segments[i];
