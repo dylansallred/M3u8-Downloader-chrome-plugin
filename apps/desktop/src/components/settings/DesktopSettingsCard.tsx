@@ -3,11 +3,14 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { Button } from '@/components/ui/button';
-import { Eye, EyeOff, FolderOpen, X } from 'lucide-react';
+import { Eye, EyeOff, FolderOpen, LoaderCircle, Trash2, X } from 'lucide-react';
+import { toast } from 'sonner';
 import type { DesktopSettings } from '@/types/settings';
 import type { QueueSettings } from '@/types/queue';
+import { createApiClient } from '@/lib/api';
 
 interface DesktopSettingsCardProps {
+  apiBase: string;
   settings: DesktopSettings;
   queueSettings: QueueSettings;
   onSave: (next: Partial<DesktopSettings>) => void;
@@ -15,6 +18,7 @@ interface DesktopSettingsCardProps {
 }
 
 export function DesktopSettingsCard({
+  apiBase,
   settings,
   queueSettings,
   onSave,
@@ -22,12 +26,35 @@ export function DesktopSettingsCard({
 }: DesktopSettingsCardProps) {
   const [showTmdbKey, setShowTmdbKey] = useState(false);
   const [showSubdlKey, setShowSubdlKey] = useState(false);
+  const [clearingTempData, setClearingTempData] = useState(false);
   const outputDirectory = String(settings.outputDirectory || '').trim();
+  const api = createApiClient(apiBase);
 
   const chooseOutputDirectory = async () => {
     const result = await window.desktop.chooseOutputDirectory();
     if (result?.ok && result.path) {
       onSave({ outputDirectory: result.path });
+    }
+  };
+
+  const clearTempDownloadData = async () => {
+    if (clearingTempData) return;
+    setClearingTempData(true);
+    try {
+      const result = await api.clearTempDownloads();
+      const removed = Number(result?.tempDirectoriesRemoved || 0)
+        + Number(result?.transientFilesRemoved || 0)
+        + Number(result?.emptiedJobDirectoriesRemoved || 0);
+      toast.success(
+        removed > 0
+          ? `Cleared ${removed} stale temp download artifact${removed === 1 ? '' : 's'}.`
+          : 'No stale temp download data was found.',
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      toast.error(message || 'Failed to clear temp download data.');
+    } finally {
+      setClearingTempData(false);
     }
   };
 
@@ -108,6 +135,26 @@ export function DesktopSettingsCard({
               <X className="size-4" />
             </Button>
           </div>
+        </div>
+
+        <div className="border-t border-border pt-4 space-y-2">
+          <label className="text-sm text-foreground font-medium">Temp download data</label>
+          <p className="text-xs text-foreground-muted">
+            Clears stale HLS temp folders and partial download files for inactive jobs before you retry a stream.
+          </p>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-8 gap-2"
+            disabled={clearingTempData}
+            onClick={() => {
+              clearTempDownloadData().catch(() => {});
+            }}
+          >
+            {clearingTempData ? <LoaderCircle className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
+            Clear temp download data
+          </Button>
         </div>
 
         <div className="border-t border-border pt-4 space-y-2">

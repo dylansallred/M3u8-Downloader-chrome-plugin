@@ -18,6 +18,7 @@ interface SettingsViewProps {
 }
 
 export function SettingsView({
+  apiBase,
   appInfo,
   settings,
   queueSettings,
@@ -29,6 +30,7 @@ export function SettingsView({
     <div className="animate-fade-slide-in space-y-5">
       <h1 className="sr-only">Settings</h1>
       <DesktopSettingsCard
+        apiBase={apiBase}
         settings={settings}
         queueSettings={queueSettings}
         onSave={onSaveSettings}

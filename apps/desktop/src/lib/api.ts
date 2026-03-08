@@ -50,6 +50,13 @@ export function createApiClient(baseUrl: string) {
     clearHistory: () => req('/api/history', { method: 'DELETE' }),
     deleteHistoryItem: (historyId: string) =>
       req(`/api/history/${encodeURIComponent(historyId)}`, { method: 'DELETE' }),
+    clearTempDownloads: () =>
+      req<{
+        ok: boolean;
+        tempDirectoriesRemoved: number;
+        transientFilesRemoved: number;
+        emptiedJobDirectoriesRemoved: number;
+      }>('/api/maintenance/clear-temp-downloads', { method: 'POST' }),
 
     // Health
     getHealth: () =>

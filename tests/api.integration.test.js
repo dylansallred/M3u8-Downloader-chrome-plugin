@@ -1661,3 +1661,46 @@ test('history clear removes stale managed artifacts including subtitles and part
     await apiServer.stop();
   }
 });
+
+test('maintenance clear-temp-downloads removes stale temp folders and partial artifacts for inactive jobs', async () => {
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'm3u8-tests-clear-temp-downloads-'));
+  const port = await getFreePort();
+  const baseUrl = `http://127.0.0.1:${port}`;
+  const downloadDir = path.join(tmpRoot, 'downloads');
+  fs.mkdirSync(downloadDir, { recursive: true });
+
+  const staleTempDir = path.join(downloadDir, 'temp-stale-job');
+  fs.mkdirSync(staleTempDir, { recursive: true });
+  fs.writeFileSync(path.join(staleTempDir, 'seg-0.ts'), Buffer.from('segment'));
+
+  const staleJobDir = path.join(downloadDir, 'abc123-def456');
+  fs.mkdirSync(staleJobDir, { recursive: true });
+  fs.writeFileSync(path.join(staleJobDir, 'video.mp4.part'), Buffer.from('partial'));
+  fs.writeFileSync(path.join(staleJobDir, 'ts-parts-abc123-def456.txt'), Buffer.from('parts'));
+
+  const topLevelPart = path.join(downloadDir, 'orphan.mp4.part');
+  fs.writeFileSync(topLevelPart, Buffer.from('partial'));
+
+  const keepFile = path.join(downloadDir, 'notes.txt');
+  fs.writeFileSync(keepFile, Buffer.from('keep'));
+
+  const apiServer = await startApi({ dataDir: tmpRoot, port });
+
+  try {
+    const clearRes = await apiFetch(baseUrl, '/api/maintenance/clear-temp-downloads', {
+      method: 'POST',
+      includeV1Headers: false,
+    });
+    assert.equal(clearRes.status, 200);
+    assert.equal(clearRes.data.ok, true);
+    assert.equal(clearRes.data.tempDirectoriesRemoved, 1);
+    assert.equal(clearRes.data.transientFilesRemoved >= 3, true);
+
+    assert.equal(fs.existsSync(staleTempDir), false);
+    assert.equal(fs.existsSync(staleJobDir), false);
+    assert.equal(fs.existsSync(topLevelPart), false);
+    assert.equal(fs.existsSync(keepFile), true);
+  } finally {
+    await apiServer.stop();
+  }
+});

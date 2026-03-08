@@ -158,6 +158,12 @@ function extractYouTubeVideoId(value) {
   }
 }
 
+function isJobStorageDirectoryName(name) {
+  const value = String(name || '').trim();
+  if (!value) return false;
+  return /^[a-z0-9]+-[a-z0-9]+$/i.test(value);
+}
+
 function createApiServer(options = {}) {
   const {
     host = API.host,
@@ -271,6 +277,17 @@ function createApiServer(options = {}) {
     next();
   });
 
+  app.post('/api/maintenance/clear-temp-downloads', async (req, res) => {
+    try {
+      const result = await clearInactiveTempDownloadArtifacts();
+      logger.info('Cleared inactive temp download artifacts', result);
+      res.json({ ok: true, ...result });
+    } catch (err) {
+      logger.error('Failed to clear temp download artifacts', { error: err && err.message });
+      res.status(500).json({ error: 'Failed to clear temp download artifacts' });
+    }
+  });
+
   const jobs = new Map();
 
   function safeFilename(name) {
@@ -326,6 +343,80 @@ function createApiServer(options = {}) {
     initialSettings: initialQueueSettings,
     getCompletedOutputDir,
   });
+
+  async function clearInactiveTempDownloadArtifacts() {
+    const activeJobIds = new Set(
+      (queueManager.getQueue() || [])
+        .filter(Boolean)
+        .filter((job) => {
+          const status = String(job.queueStatus || job.status || '').trim();
+          return status === 'queued'
+            || status === 'paused'
+            || status === 'downloading'
+            || status === 'fetching-playlist';
+        })
+        .map((job) => String(job.id || '').trim())
+        .filter(Boolean),
+    );
+
+    let tempDirectoriesRemoved = 0;
+    let transientFilesRemoved = 0;
+    let emptiedJobDirectoriesRemoved = 0;
+
+    const entries = await fsPromises.readdir(resolvedDownloadDir, { withFileTypes: true });
+    for (const entry of entries) {
+      const fullPath = path.join(resolvedDownloadDir, entry.name);
+
+      if (entry.isDirectory() && entry.name.startsWith('temp-')) {
+        const linkedJobId = queueManager.extractJobIdFromTempDirName(entry.name);
+        const shouldKeep = linkedJobId
+          ? activeJobIds.has(linkedJobId)
+          : activeJobIds.size > 0;
+        if (shouldKeep) continue;
+
+        await fsPromises.rm(fullPath, { recursive: true, force: true });
+        tempDirectoriesRemoved += 1;
+        continue;
+      }
+
+      if (entry.isDirectory() && isJobStorageDirectoryName(entry.name) && !activeJobIds.has(entry.name)) {
+        const nestedEntries = await fsPromises.readdir(fullPath, { withFileTypes: true });
+        for (const nestedEntry of nestedEntries) {
+          if (!nestedEntry.isFile()) continue;
+          const nestedName = nestedEntry.name;
+          if (
+            nestedName.endsWith('.part')
+            || nestedName.endsWith('.tmp')
+            || /^ts-parts-.*[.]txt$/i.test(nestedName)
+          ) {
+            await fsPromises.rm(path.join(fullPath, nestedName), { force: true });
+            transientFilesRemoved += 1;
+          }
+        }
+
+        const remaining = await fsPromises.readdir(fullPath);
+        if (remaining.length === 0) {
+          await fsPromises.rmdir(fullPath);
+          emptiedJobDirectoriesRemoved += 1;
+        }
+        continue;
+      }
+
+      if (
+        entry.isFile()
+        && (entry.name.endsWith('.part') || entry.name.endsWith('.tmp') || /^ts-parts-.*[.]txt$/i.test(entry.name))
+      ) {
+        await fsPromises.rm(fullPath, { force: true });
+        transientFilesRemoved += 1;
+      }
+    }
+
+    return {
+      tempDirectoriesRemoved,
+      transientFilesRemoved,
+      emptiedJobDirectoriesRemoved,
+    };
+  }
 
   let notifyHistoryChange = () => {};
   const historyIndex = new HistoryIndexService({
