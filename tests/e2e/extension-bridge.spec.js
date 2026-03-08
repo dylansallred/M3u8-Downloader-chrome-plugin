@@ -272,7 +272,7 @@ test('extension popup can send detected media to local API queue', async () => {
   test.skip(process.platform === 'win32', 'Extension automation is validated in CI on Linux runner');
 
   await withFixtureApp(async ({ apiBaseUrl, popupPage }) => {
-    await expect(popupPage.locator('#connectionStatus')).toContainText('Desktop connected');
+    await expect(popupPage.locator('#connectionStatus')).toContainText('App connected');
 
     await popupPage.click('#refreshButton');
     await expect(popupPage.locator('.media-item').first()).toBeVisible();
@@ -330,7 +330,7 @@ test('extension recovers after local desktop API restarts and can enqueue again'
 
   try {
     await withExtensionOnly(apiBaseUrl, async ({ popupPage }) => {
-      await expect(popupPage.locator('#connectionStatus')).toContainText('Desktop connected');
+      await expect(popupPage.locator('#connectionStatus')).toContainText('App connected');
 
       await popupPage.click('#refreshButton');
       await expect(popupPage.locator('.media-item').first()).toBeVisible();
@@ -345,7 +345,7 @@ test('extension recovers after local desktop API restarts and can enqueue again'
       apiServer = await startTestApiServer({ dataRoot, port: apiPort });
       await popupPage.waitForTimeout(350);
       await popupPage.click('#refreshButton');
-      await expect(popupPage.locator('#connectionStatus')).toContainText('Desktop connected');
+      await expect(popupPage.locator('#connectionStatus')).toContainText('App connected');
 
       await popupPage.click('button:has-text("Send to App")');
       await waitForQueueCount(apiBaseUrl, 2, 10_000);
