@@ -87,6 +87,7 @@ function buildRemuxArgs({ job, input, mp4Path, withSubs }) {
 
 function buildPlaybackCompatibilityArgs({ job, inputPath, outputPath, withSubs = true }) {
   const metadataArgs = buildFfmpegMetadataArgs(job);
+  const aggressiveAudioRepair = job && job.aggressiveAudioRepair === true;
   const args = [
     '-y',
     '-fflags', '+genpts+discardcorrupt',
@@ -101,20 +102,30 @@ function buildPlaybackCompatibilityArgs({ job, inputPath, outputPath, withSubs =
     args.push('-map', '0:s?');
   }
 
-  args.push(
-    '-c:v', 'libx264',
-    '-preset', 'veryfast',
-    '-crf', '18',
-    '-pix_fmt', 'yuv420p',
-    '-profile:v', 'high',
-    '-level:v', '4.1',
-    '-vsync', 'cfr',
-    '-video_track_timescale', '90000',
-    '-c:a', 'aac',
-    '-b:a', '192k',
-    '-ar', '48000',
-    '-af', 'aresample=async=1000:first_pts=0',
-  );
+  if (aggressiveAudioRepair) {
+    args.push(
+      '-c:v', 'copy',
+      '-c:a', 'aac',
+      '-b:a', '192k',
+      '-ar', '48000',
+      '-af', 'aresample=async=1000:min_comp=0.001:min_hard_comp=0.100:first_pts=0,asetpts=N/SR/TB',
+    );
+  } else {
+    args.push(
+      '-c:v', 'libx264',
+      '-preset', 'veryfast',
+      '-crf', '18',
+      '-pix_fmt', 'yuv420p',
+      '-profile:v', 'high',
+      '-level:v', '4.1',
+      '-vsync', 'cfr',
+      '-video_track_timescale', '90000',
+      '-c:a', 'aac',
+      '-b:a', '192k',
+      '-ar', '48000',
+      '-af', 'aresample=async=1000:first_pts=0',
+    );
+  }
 
   if (withSubs) {
     args.push('-c:s', 'mov_text');
@@ -130,22 +141,243 @@ function buildPlaybackCompatibilityArgs({ job, inputPath, outputPath, withSubs =
   return args;
 }
 
+function normalizeNumber(value) {
+  const parsed = Number.parseFloat(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function analyzeAudioPacketTimeline(packetRows, {
+  gapThresholdSeconds = 0.03,
+  overlapThresholdSeconds = 0.03,
+  maxExamples = 5,
+} = {}) {
+  const rows = Array.isArray(packetRows) ? packetRows : [];
+  let packetCount = 0;
+  let gapCount = 0;
+  let overlapCount = 0;
+  let maxGapSeconds = 0;
+  let maxOverlapSeconds = 0;
+  let previousEndSeconds = null;
+  const issues = [];
+
+  for (const row of rows) {
+    if (!row) continue;
+    const ptsSeconds = normalizeNumber(Array.isArray(row) ? row[0] : row.pts_time);
+    const durationSeconds = normalizeNumber(Array.isArray(row) ? row[1] : row.duration_time);
+    if (ptsSeconds === null || durationSeconds === null || durationSeconds <= 0) {
+      continue;
+    }
+
+    packetCount += 1;
+
+    if (previousEndSeconds !== null) {
+      const deltaSeconds = ptsSeconds - previousEndSeconds;
+      const rowGapThreshold = Math.max(gapThresholdSeconds, durationSeconds * 1.5);
+      const rowOverlapThreshold = Math.max(overlapThresholdSeconds, durationSeconds * 1.5);
+
+      if (deltaSeconds > rowGapThreshold) {
+        gapCount += 1;
+        maxGapSeconds = Math.max(maxGapSeconds, deltaSeconds);
+        if (issues.length < maxExamples) {
+          issues.push({
+            type: 'gap',
+            previousEndSeconds: Number(previousEndSeconds.toFixed(6)),
+            nextPtsSeconds: Number(ptsSeconds.toFixed(6)),
+            deltaSeconds: Number(deltaSeconds.toFixed(6)),
+          });
+        }
+      } else if (deltaSeconds < -rowOverlapThreshold) {
+        const overlapSeconds = Math.abs(deltaSeconds);
+        overlapCount += 1;
+        maxOverlapSeconds = Math.max(maxOverlapSeconds, overlapSeconds);
+        if (issues.length < maxExamples) {
+          issues.push({
+            type: 'overlap',
+            previousEndSeconds: Number(previousEndSeconds.toFixed(6)),
+            nextPtsSeconds: Number(ptsSeconds.toFixed(6)),
+            deltaSeconds: Number(deltaSeconds.toFixed(6)),
+          });
+        }
+      }
+    }
+
+    previousEndSeconds = ptsSeconds + durationSeconds;
+  }
+
+  return {
+    packetCount,
+    gapCount,
+    overlapCount,
+    maxGapSeconds: Number(maxGapSeconds.toFixed(6)),
+    maxOverlapSeconds: Number(maxOverlapSeconds.toFixed(6)),
+    issues,
+    shouldRepair: gapCount > 0,
+  };
+}
+
+async function probeAudioPacketTimeline(filePath, {
+  FFPROBE_PATH,
+  timeoutMs = 20000,
+} = {}) {
+  if (!filePath || !FFPROBE_PATH) {
+    return {
+      ok: false,
+      skipped: true,
+      analysis: analyzeAudioPacketTimeline([]),
+    };
+  }
+
+  try {
+    await fs.promises.access(filePath);
+  } catch {
+    return {
+      ok: false,
+      skipped: false,
+      analysis: analyzeAudioPacketTimeline([]),
+      error: `Missing file for audio timeline probe: ${filePath}`,
+    };
+  }
+
+  return new Promise((resolve) => {
+    const args = [
+      '-v', 'error',
+      '-select_streams', 'a:0',
+      '-show_entries', 'packet=pts_time,duration_time',
+      '-show_packets',
+      '-of', 'csv=p=0',
+      filePath,
+    ];
+    const child = spawn(FFPROBE_PATH, args, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    let stdoutBuffer = '';
+    let stderr = '';
+    let settled = false;
+    const packetRows = [];
+
+    const settle = (result) => {
+      if (settled) return;
+      settled = true;
+      resolve(result);
+    };
+
+    const consumeBuffer = (flush = false) => {
+      let newlineIndex = stdoutBuffer.indexOf('\n');
+      while (newlineIndex !== -1) {
+        const line = stdoutBuffer.slice(0, newlineIndex).trim();
+        stdoutBuffer = stdoutBuffer.slice(newlineIndex + 1);
+        if (line) {
+          const parts = line.split(',').map((value) => String(value || '').trim());
+          packetRows.push(parts);
+        }
+        newlineIndex = stdoutBuffer.indexOf('\n');
+      }
+
+      if (flush) {
+        const line = stdoutBuffer.trim();
+        stdoutBuffer = '';
+        if (line) {
+          const parts = line.split(',').map((value) => String(value || '').trim());
+          packetRows.push(parts);
+        }
+      }
+    };
+
+    const killTimer = setTimeout(() => {
+      child.kill('SIGKILL');
+      settle({
+        ok: false,
+        skipped: false,
+        analysis: analyzeAudioPacketTimeline(packetRows),
+        error: `ffprobe timed out after ${timeoutMs}ms`,
+      });
+    }, timeoutMs);
+
+    if (child.stdout) {
+      child.stdout.on('data', (chunk) => {
+        stdoutBuffer += Buffer.from(chunk).toString('utf8');
+        consumeBuffer(false);
+      });
+    }
+
+    if (child.stderr) {
+      child.stderr.on('data', (chunk) => {
+        stderr += Buffer.from(chunk).toString('utf8');
+      });
+    }
+
+    child.on('error', (err) => {
+      clearTimeout(killTimer);
+      settle({
+        ok: false,
+        skipped: false,
+        analysis: analyzeAudioPacketTimeline(packetRows),
+        error: err && err.message ? err.message : 'ffprobe failed to start',
+      });
+    });
+
+    child.on('close', (code) => {
+      clearTimeout(killTimer);
+      consumeBuffer(true);
+      if (code !== 0) {
+        settle({
+          ok: false,
+          skipped: false,
+          analysis: analyzeAudioPacketTimeline(packetRows),
+          error: stderr.trim() || `ffprobe exited with code ${code}`,
+        });
+        return;
+      }
+
+      settle({
+        ok: true,
+        skipped: false,
+        analysis: analyzeAudioPacketTimeline(packetRows),
+      });
+    });
+  });
+}
+
+async function replaceFileWithTempOutput(targetPath, tempOutputPath) {
+  const backupPath = `${targetPath}.bak`;
+
+  try {
+    fs.unlinkSync(backupPath);
+  } catch (_) {}
+
+  await fs.promises.rename(targetPath, backupPath);
+  try {
+    await fs.promises.rename(tempOutputPath, targetPath);
+    await fs.promises.unlink(backupPath);
+  } catch (err) {
+    try {
+      await fs.promises.rename(backupPath, targetPath);
+    } catch (_) {}
+    throw err;
+  }
+}
+
 async function normalizeMp4ForPlayback(job, mp4Path, {
   FFMPEG_PATH,
+  FFPROBE_PATH,
 }) {
   if (!job || !mp4Path || !FFMPEG_PATH || job.forcePlaybackCompatibility === false) {
     return { ok: false, skipped: true };
   }
 
   const tempOutputPath = `${mp4Path}.normalize.part`;
-  const backupPath = `${mp4Path}.pre-normalize.bak`;
+  const aggressiveTempOutputPath = `${mp4Path}.normalize-aggressive.part`;
   let normalizationError = null;
 
-  const runFfmpeg = (withSubs) => new Promise((resolve, reject) => {
+  const runFfmpeg = ({ withSubs, inputPath, outputPath, aggressiveAudioRepair = false }) => new Promise((resolve, reject) => {
     const args = buildPlaybackCompatibilityArgs({
-      job,
-      inputPath: mp4Path,
-      outputPath: tempOutputPath,
+      job: {
+        ...job,
+        aggressiveAudioRepair,
+      },
+      inputPath,
+      outputPath,
       withSubs,
     });
     const stderrChunks = [];
@@ -193,8 +425,14 @@ async function normalizeMp4ForPlayback(job, mp4Path, {
   });
 
   try {
+    let normalizedWithSubs = true;
     try {
-      await runFfmpeg(true);
+      await runFfmpeg({
+        withSubs: true,
+        inputPath: mp4Path,
+        outputPath: tempOutputPath,
+        aggressiveAudioRepair: false,
+      });
     } catch (err) {
       normalizationError = err;
       logger.warn('Playback compatibility normalization failed with subtitles; retrying without subtitles', {
@@ -204,22 +442,124 @@ async function normalizeMp4ForPlayback(job, mp4Path, {
       try {
         fs.unlinkSync(tempOutputPath);
       } catch (_) {}
-      await runFfmpeg(false);
+      normalizedWithSubs = false;
+      await runFfmpeg({
+        withSubs: false,
+        inputPath: mp4Path,
+        outputPath: tempOutputPath,
+        aggressiveAudioRepair: false,
+      });
     }
 
-    try {
-      fs.unlinkSync(backupPath);
-    } catch (_) {}
+    await replaceFileWithTempOutput(mp4Path, tempOutputPath);
 
-    await fs.promises.rename(mp4Path, backupPath);
-    try {
-      await fs.promises.rename(tempOutputPath, mp4Path);
-      await fs.promises.unlink(backupPath);
-    } catch (swapErr) {
+    const initialTimelineProbe = await probeAudioPacketTimeline(mp4Path, { FFPROBE_PATH });
+    if (!initialTimelineProbe.skipped) {
+      job.playbackDiagnostics = {
+        ...(job.playbackDiagnostics || {}),
+        audioTimeline: {
+          detectedAt: Date.now(),
+          analysis: initialTimelineProbe.analysis,
+          probeOk: !!initialTimelineProbe.ok,
+          probeError: initialTimelineProbe.error || null,
+          aggressiveRepairAttempted: false,
+          aggressiveRepairApplied: false,
+          aggressiveRepairImproved: false,
+          aggressiveRepairProbeOk: null,
+          aggressiveRepairError: null,
+        },
+      };
+    }
+
+    if (initialTimelineProbe.ok && initialTimelineProbe.analysis.shouldRepair) {
+      logger.warn('Detected audio timeline gaps after playback normalization; retrying with aggressive audio repair', {
+        jobId: job.id,
+        mp4Path,
+        gapCount: initialTimelineProbe.analysis.gapCount,
+        maxGapSeconds: initialTimelineProbe.analysis.maxGapSeconds,
+      });
+
+      job.playbackDiagnostics = {
+        ...(job.playbackDiagnostics || {}),
+        audioTimeline: {
+          ...(job.playbackDiagnostics && job.playbackDiagnostics.audioTimeline
+            ? job.playbackDiagnostics.audioTimeline
+            : {}),
+          aggressiveRepairAttempted: true,
+        },
+      };
+
       try {
-        await fs.promises.rename(backupPath, mp4Path);
-      } catch (_) {}
-      throw swapErr;
+        await runFfmpeg({
+          withSubs: normalizedWithSubs,
+          inputPath: mp4Path,
+          outputPath: aggressiveTempOutputPath,
+          aggressiveAudioRepair: true,
+        });
+
+        const aggressiveTimelineProbe = await probeAudioPacketTimeline(aggressiveTempOutputPath, { FFPROBE_PATH });
+        const improved = aggressiveTimelineProbe.ok && (
+          aggressiveTimelineProbe.analysis.gapCount < initialTimelineProbe.analysis.gapCount
+          || aggressiveTimelineProbe.analysis.maxGapSeconds < initialTimelineProbe.analysis.maxGapSeconds
+          || !aggressiveTimelineProbe.analysis.shouldRepair
+        );
+
+        job.playbackDiagnostics = {
+          ...(job.playbackDiagnostics || {}),
+          audioTimeline: {
+            ...(job.playbackDiagnostics && job.playbackDiagnostics.audioTimeline
+              ? job.playbackDiagnostics.audioTimeline
+              : {}),
+            aggressiveRepairProbeOk: !!aggressiveTimelineProbe.ok,
+            aggressiveRepairAnalysis: aggressiveTimelineProbe.analysis,
+            aggressiveRepairError: aggressiveTimelineProbe.error || null,
+            aggressiveRepairImproved: improved,
+          },
+        };
+
+        if (improved) {
+          await replaceFileWithTempOutput(mp4Path, aggressiveTempOutputPath);
+          job.playbackDiagnostics.audioTimeline.aggressiveRepairApplied = true;
+          logger.info('Aggressive audio repair reduced timeline gaps', {
+            jobId: job.id,
+            mp4Path,
+            originalGapCount: initialTimelineProbe.analysis.gapCount,
+            originalMaxGapSeconds: initialTimelineProbe.analysis.maxGapSeconds,
+            repairedGapCount: aggressiveTimelineProbe.analysis.gapCount,
+            repairedMaxGapSeconds: aggressiveTimelineProbe.analysis.maxGapSeconds,
+          });
+        } else {
+          try {
+            fs.unlinkSync(aggressiveTempOutputPath);
+          } catch (_) {}
+          logger.warn('Aggressive audio repair did not improve detected timeline gaps; keeping prior MP4', {
+            jobId: job.id,
+            mp4Path,
+            originalGapCount: initialTimelineProbe.analysis.gapCount,
+            originalMaxGapSeconds: initialTimelineProbe.analysis.maxGapSeconds,
+            repairedGapCount: aggressiveTimelineProbe.analysis.gapCount,
+            repairedMaxGapSeconds: aggressiveTimelineProbe.analysis.maxGapSeconds,
+          });
+        }
+      } catch (err) {
+        try {
+          fs.unlinkSync(aggressiveTempOutputPath);
+        } catch (_) {}
+        job.playbackDiagnostics = {
+          ...(job.playbackDiagnostics || {}),
+          audioTimeline: {
+            ...(job.playbackDiagnostics && job.playbackDiagnostics.audioTimeline
+              ? job.playbackDiagnostics.audioTimeline
+              : {}),
+            aggressiveRepairError: err && err.message ? err.message : 'Unknown aggressive repair failure',
+          },
+        };
+        logger.warn('Aggressive audio repair failed; keeping prior MP4', {
+          jobId: job.id,
+          mp4Path,
+          message: err && err.message,
+        });
+      }
     }
 
     logger.info('Playback compatibility normalization completed', {
@@ -230,6 +570,9 @@ async function normalizeMp4ForPlayback(job, mp4Path, {
   } catch (err) {
     try {
       fs.unlinkSync(tempOutputPath);
+    } catch (_) {}
+    try {
+      fs.unlinkSync(aggressiveTempOutputPath);
     } catch (_) {}
     logger.warn('Playback compatibility normalization failed; keeping original MP4', {
       jobId: job.id,
@@ -542,7 +885,7 @@ async function remuxAndGenerateThumbnails(job, filePathFinal, {
     job.mp4Path = mp4Path;
 
     if (job.forcePlaybackCompatibility !== false) {
-      await normalizeMp4ForPlayback(job, mp4Path, { FFMPEG_PATH });
+      await normalizeMp4ForPlayback(job, mp4Path, { FFMPEG_PATH, FFPROBE_PATH });
     }
 
     // IMPORTANT: failure in the thumbnail step should not be treated as a remux failure.
@@ -636,8 +979,10 @@ module.exports = {
   normalizeMp4ForPlayback,
   remuxAndGenerateThumbnails,
   __test: {
+    analyzeAudioPacketTimeline,
     buildPlaybackCompatibilityArgs,
     buildRemuxArgs,
+    probeAudioPacketTimeline,
     resolveRemuxInput,
   },
 };

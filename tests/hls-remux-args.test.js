@@ -145,6 +145,54 @@ test('playback compatibility args can retry without subtitles', () => {
   assert.equal(args.includes('mov_text'), false);
 });
 
+test('aggressive playback compatibility args focus on audio timeline repair', () => {
+  const args = __test.buildPlaybackCompatibilityArgs({
+    job: {
+      id: 'job-compat-aggressive',
+      aggressiveAudioRepair: true,
+    },
+    inputPath: '/downloads/job-compat-aggressive.mp4',
+    outputPath: '/downloads/job-compat-aggressive.mp4.normalize.part',
+    withSubs: true,
+  });
+
+  assert.ok(args.includes('-c:v'));
+  assert.ok(args.includes('copy'));
+  assert.ok(args.includes('-c:a'));
+  assert.ok(args.includes('aac'));
+  assert.ok(args.includes('-af'));
+  assert.ok(args.includes('aresample=async=1000:min_comp=0.001:min_hard_comp=0.100:first_pts=0,asetpts=N/SR/TB'));
+  assert.equal(args.includes('libx264'), false);
+  assert.equal(args.includes('veryfast'), false);
+  assert.equal(args.includes('cfr'), false);
+});
+
+test('audio timeline analyzer flags packet gaps above the threshold', () => {
+  const result = __test.analyzeAudioPacketTimeline([
+    ['0.000000', '0.021333'],
+    ['0.021333', '0.021333'],
+    ['0.085333', '0.021333'],
+  ]);
+
+  assert.equal(result.packetCount, 3);
+  assert.equal(result.gapCount, 1);
+  assert.equal(result.shouldRepair, true);
+  assert.ok(result.maxGapSeconds >= 0.04);
+  assert.equal(result.issues[0].type, 'gap');
+});
+
+test('audio timeline analyzer ignores normal packet jitter', () => {
+  const result = __test.analyzeAudioPacketTimeline([
+    ['0.000000', '0.021333'],
+    ['0.021900', '0.021333'],
+    ['0.043500', '0.021333'],
+  ]);
+
+  assert.equal(result.packetCount, 3);
+  assert.equal(result.gapCount, 0);
+  assert.equal(result.shouldRepair, false);
+});
+
 test('segment diagnostics flags missing streams relative to the baseline profile', () => {
   const baseline = summarizeProbeStreams({
     streams: [

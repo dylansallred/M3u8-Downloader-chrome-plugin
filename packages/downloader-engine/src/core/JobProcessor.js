@@ -862,7 +862,7 @@ function createJobProcessor({
     await fsPromises.rename(tempMp4Path, mp4Path);
 
     if (job.forcePlaybackCompatibility !== false) {
-      await normalizeMp4ForPlayback(job, mp4Path, { FFMPEG_PATH });
+      await normalizeMp4ForPlayback(job, mp4Path, { FFMPEG_PATH, FFPROBE_PATH });
     }
 
     try {
