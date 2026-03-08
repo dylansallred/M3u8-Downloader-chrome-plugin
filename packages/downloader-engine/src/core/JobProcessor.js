@@ -9,6 +9,13 @@ const {
   inspectHlsPlaylist,
   shouldPreferNativeHlsDownload,
 } = require('./HlsNativeDownload');
+const {
+  analyzeSegmentProbe,
+  ensureSegmentDiagnostics,
+  probeSegmentFile,
+  recordSegmentDiagnostic,
+  writeSegmentDiagnosticsReport,
+} = require('./HlsSegmentDiagnostics');
 const { generateThumbnailFromMp4, normalizeMp4ForPlayback, remuxAndGenerateThumbnails } = require('./VideoConverter');
 const logger = require('../utils/logger');
 
@@ -1263,6 +1270,7 @@ function createJobProcessor({
       }
 
       const headers = buildHlsRequestHeaders(job.headers || {});
+      const segmentDiagnostics = ensureSegmentDiagnostics(job);
       const { text: playlistText, finalUrl: playlistUrl } = await fetchText(job.url, headers);
       const playlistInfo = inspectHlsPlaylist(playlistText, playlistUrl || job.url);
       const segments = playlistInfo.segments.length > 0
@@ -1375,6 +1383,7 @@ function createJobProcessor({
 
       // Track how many times each segment has been attempted in total.
       const attempts = new Array(segments.length).fill(0);
+      let expectedSegmentProfile = segmentDiagnostics.expectedProfile || null;
 
       // Track when a segment is next eligible to be retried (for backoff).
       const nextAttemptAt = new Array(segments.length).fill(0);
@@ -1510,6 +1519,36 @@ function createJobProcessor({
 
           // Check if segment already exists from previous download
           if (existingSegments.has(i)) {
+            const probeResult = await probeSegmentFile(canonicalSegmentPath, { FFPROBE_PATH });
+            if (!probeResult.skipped) {
+              if (probeResult.ok) {
+                const analysis = analyzeSegmentProbe(probeResult.probeData, expectedSegmentProfile);
+                const promoteObservedProfile =
+                  !expectedSegmentProfile && analysis.observedProfile.streamCount > 0;
+                recordSegmentDiagnostic(job, {
+                  index: i,
+                  url: segmentUrl,
+                  path: canonicalSegmentPath,
+                  observedProfile: analysis.observedProfile,
+                  issues: analysis.issues,
+                  validatedAt: Date.now(),
+                  promoteObservedProfile,
+                });
+                if (promoteObservedProfile) {
+                  expectedSegmentProfile = analysis.observedProfile;
+                }
+              } else {
+                recordSegmentDiagnostic(job, {
+                  index: i,
+                  url: segmentUrl,
+                  path: canonicalSegmentPath,
+                  observedProfile: null,
+                  issues: probeResult.issues,
+                  validatedAt: Date.now(),
+                  promoteObservedProfile: false,
+                });
+              }
+            }
             success = true;
             job.completedSegments += 1;
             
@@ -1628,6 +1667,58 @@ function createJobProcessor({
                 });
               }
 
+              const validationPath = fs.existsSync(canonicalSegmentPath)
+                ? canonicalSegmentPath
+                : attemptTempPath;
+              const probeResult = await probeSegmentFile(validationPath, { FFPROBE_PATH });
+
+              if (!probeResult.skipped) {
+                if (probeResult.ok) {
+                  const analysis = analyzeSegmentProbe(probeResult.probeData, expectedSegmentProfile);
+                  const promoteObservedProfile =
+                    !expectedSegmentProfile && analysis.observedProfile.streamCount > 0;
+                  recordSegmentDiagnostic(job, {
+                    index: i,
+                    url: segmentUrl,
+                    path: validationPath,
+                    observedProfile: analysis.observedProfile,
+                    issues: analysis.issues,
+                    validatedAt: Date.now(),
+                    promoteObservedProfile,
+                  });
+                  if (promoteObservedProfile) {
+                    expectedSegmentProfile = analysis.observedProfile;
+                  }
+                  if (analysis.issues.length > 0) {
+                    logger.warn('HLS segment validation reported suspicious media characteristics', {
+                      jobId: job.id,
+                      segmentIndex: i,
+                      issues: analysis.issues.map((issue) => issue.code),
+                      observedProfile: analysis.observedProfile,
+                    });
+                  }
+                  if (analysis.shouldRetry) {
+                    throw new Error(`Segment validation failed: ${analysis.issues.map((issue) => issue.code).join(', ')}`);
+                  }
+                } else {
+                  recordSegmentDiagnostic(job, {
+                    index: i,
+                    url: segmentUrl,
+                    path: validationPath,
+                    observedProfile: null,
+                    issues: probeResult.issues,
+                    validatedAt: Date.now(),
+                    promoteObservedProfile: false,
+                  });
+                  logger.warn('HLS segment validation failed', {
+                    jobId: job.id,
+                    segmentIndex: i,
+                    issues: probeResult.issues.map((issue) => issue.code),
+                  });
+                  throw new Error(`Segment validation failed: ${probeResult.issues.map((issue) => issue.code).join(', ')}`);
+                }
+              }
+
               job.segmentStates[i] = {
                 status: 'completed',
                 attempt,
@@ -1647,6 +1738,12 @@ function createJobProcessor({
                 await fsPromises.unlink(attemptTempPath);
               } catch (_) {
               }
+            }
+            try {
+              if (fs.existsSync(canonicalSegmentPath)) {
+                await fsPromises.unlink(canonicalSegmentPath);
+              }
+            } catch (_) {
             }
             console.warn(attempt > 1 ? 'Retry segment failed' : 'Segment download failed', {
               jobId: job.id,
@@ -1824,6 +1921,23 @@ function createJobProcessor({
         });
       }
       job.segmentFiles = null;
+      try {
+        const diagnosticsOutputDir = job.storageDir || (job.filePath ? path.dirname(job.filePath) : downloadDir);
+        const reportPath = await writeSegmentDiagnosticsReport(job, diagnosticsOutputDir);
+        if (reportPath) {
+          logger.info('Wrote HLS segment diagnostics report', {
+            jobId: job.id,
+            reportPath,
+            validatedSegments: job.segmentDiagnostics && job.segmentDiagnostics.validatedSegments,
+            issueCount: job.segmentDiagnostics && job.segmentDiagnostics.issueCount,
+          });
+        }
+      } catch (diagnosticErr) {
+        logger.warn('Failed to finalize HLS segment diagnostics report', {
+          jobId: job.id,
+          error: diagnosticErr && diagnosticErr.message,
+        });
+      }
 
       if (job.cancelled) {
         job.status = 'cancelled';
@@ -1853,6 +1967,13 @@ function createJobProcessor({
       logger.info('HLS job finished', { jobId: job && job.id, status: job.status });
     } catch (err) {
       logger.error('HLS job failed', { jobId: job && job.id, error: err && err.message });
+      if (job) {
+        try {
+          const diagnosticsOutputDir = job.storageDir || (job.filePath ? path.dirname(job.filePath) : downloadDir);
+          await writeSegmentDiagnosticsReport(job, diagnosticsOutputDir);
+        } catch (_) {
+        }
+      }
       const usedFallback = await tryDirectFallback(job, err);
       if (usedFallback) {
         return;

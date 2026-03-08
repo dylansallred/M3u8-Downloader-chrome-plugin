@@ -528,6 +528,15 @@ function registerJobRoutes(
     const subtitleDownloadUrl = job.subtitlePath && fs.existsSync(job.subtitlePath)
       ? buildDownloadAssetUrl(downloadDir, job.subtitlePath)
       : null;
+    const segmentDiagnostics = job.segmentDiagnostics && typeof job.segmentDiagnostics === 'object'
+      ? job.segmentDiagnostics
+      : null;
+    const segmentDiagnosticsDownloadUrl =
+      segmentDiagnostics
+      && segmentDiagnostics.reportPath
+      && fs.existsSync(segmentDiagnostics.reportPath)
+        ? buildDownloadAssetUrl(downloadDir, segmentDiagnostics.reportPath)
+        : null;
 
     res.json({
       id: job.id,
@@ -552,6 +561,15 @@ function registerJobRoutes(
       thumbnailUrls: [...localThumbs, ...remoteThumbs],
       subtitlePath: job.subtitlePath || null,
       subtitleDownloadUrl,
+      segmentDiagnosticsSummary: segmentDiagnostics ? {
+        validatedSegments: Number(segmentDiagnostics.validatedSegments || 0) || 0,
+        issueCount: Number(segmentDiagnostics.issueCount || 0) || 0,
+        segmentsWithIssues: Array.isArray(segmentDiagnostics.segmentsWithIssues)
+          ? segmentDiagnostics.segmentsWithIssues.length
+          : 0,
+        expectedProfile: segmentDiagnostics.expectedProfile || null,
+      } : null,
+      segmentDiagnosticsDownloadUrl,
       updatedAt: job.updatedAt,
       tmdbId: job.tmdbId || null,
       tmdbTitle: job.tmdbTitle || null,
@@ -559,6 +577,49 @@ function registerJobRoutes(
       tmdbMetadata: job.tmdbMetadata || null,
       youtubeMetadata: job.youtubeMetadata || null,
       mediaHints: job.mediaHints || null,
+    });
+  });
+
+  app.get('/api/jobs/:id/segment-diagnostics', jobIdValidation, (req, res) => {
+    const job = jobs.get(req.params.id);
+    if (!job) {
+      logger.warn('Segment diagnostics requested for missing job', { jobId: req.params.id });
+      return res.status(404).json({ error: 'Job not found' });
+    }
+
+    const diagnostics = job.segmentDiagnostics && typeof job.segmentDiagnostics === 'object'
+      ? job.segmentDiagnostics
+      : null;
+
+    if (!diagnostics) {
+      return res.json({
+        jobId: job.id,
+        validatedSegments: 0,
+        issueCount: 0,
+        expectedProfile: null,
+        segmentsWithIssues: [],
+        reportPath: null,
+        reportDownloadUrl: null,
+      });
+    }
+
+    const reportDownloadUrl =
+      diagnostics.reportPath
+      && fs.existsSync(diagnostics.reportPath)
+        ? buildDownloadAssetUrl(downloadDir, diagnostics.reportPath)
+        : null;
+
+    res.json({
+      jobId: job.id,
+      validatedSegments: Number(diagnostics.validatedSegments || 0) || 0,
+      issueCount: Number(diagnostics.issueCount || 0) || 0,
+      expectedProfile: diagnostics.expectedProfile || null,
+      segmentsWithIssues: Array.isArray(diagnostics.segmentsWithIssues)
+        ? diagnostics.segmentsWithIssues
+        : [],
+      reportPath: diagnostics.reportPath || null,
+      reportDownloadUrl,
+      updatedAt: diagnostics.updatedAt || null,
     });
   });
 

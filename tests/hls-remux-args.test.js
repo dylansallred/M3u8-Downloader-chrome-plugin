@@ -2,6 +2,10 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const { __test } = require('../packages/downloader-engine/src/core/VideoConverter');
+const {
+  analyzeSegmentProbe,
+  summarizeProbeStreams,
+} = require('../packages/downloader-engine/src/core/HlsSegmentDiagnostics');
 
 test('remux prefers original HLS segment boundaries when available', () => {
   const job = {
@@ -102,4 +106,35 @@ test('playback compatibility args can retry without subtitles', () => {
 
   assert.equal(args.includes('0:s?'), false);
   assert.equal(args.includes('mov_text'), false);
+});
+
+test('segment diagnostics flags missing streams relative to the baseline profile', () => {
+  const baseline = summarizeProbeStreams({
+    streams: [
+      { codec_type: 'video', codec_name: 'h264' },
+      { codec_type: 'audio', codec_name: 'aac' },
+    ],
+    format: { format_name: 'mpegts', duration: '4.000000' },
+  });
+
+  const result = analyzeSegmentProbe({
+    streams: [
+      { codec_type: 'audio', codec_name: 'aac' },
+    ],
+    format: { format_name: 'mpegts', duration: '4.000000' },
+  }, baseline);
+
+  assert.equal(result.observedProfile.hasVideo, false);
+  assert.equal(result.observedProfile.hasAudio, true);
+  assert.ok(result.issues.some((issue) => issue.code === 'missing_video_stream'));
+});
+
+test('segment diagnostics mark empty probe results as retryable', () => {
+  const result = analyzeSegmentProbe({
+    streams: [],
+    format: { format_name: 'mpegts', duration: '0' },
+  }, null);
+
+  assert.ok(result.issues.some((issue) => issue.code === 'no_streams'));
+  assert.equal(result.shouldRetry, true);
 });

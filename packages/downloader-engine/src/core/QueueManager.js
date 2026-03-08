@@ -400,6 +400,7 @@ class QueueManager {
           subtitlePath: job.subtitlePath,
           subtitleZipPath: job.subtitleZipPath,
           subtitleMeta: job.subtitleMeta,
+          segmentDiagnostics: job.segmentDiagnostics || null,
           forcePlaybackCompatibility: !!job.forcePlaybackCompatibility,
           fallbackUrl: job.fallbackUrl,
           directFallbackFilePath: job.directFallbackFilePath,
