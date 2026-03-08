@@ -86,12 +86,24 @@ test('playback compatibility args re-encode HLS outputs with audio resync', () =
   assert.ok(args.includes('make_zero'));
   assert.ok(args.includes('-c:v'));
   assert.ok(args.includes('libx264'));
+  assert.ok(args.includes('-profile:v'));
+  assert.ok(args.includes('high'));
+  assert.ok(args.includes('-level:v'));
+  assert.ok(args.includes('4.1'));
+  assert.ok(args.includes('-vsync'));
+  assert.ok(args.includes('cfr'));
+  assert.ok(args.includes('-video_track_timescale'));
+  assert.ok(args.includes('90000'));
   assert.ok(args.includes('-c:a'));
   assert.ok(args.includes('aac'));
+  assert.ok(args.includes('-ar'));
+  assert.ok(args.includes('48000'));
   assert.ok(args.includes('-af'));
-  assert.ok(args.includes('aresample=async=1:first_pts=0'));
+  assert.ok(args.includes('aresample=async=1000:first_pts=0'));
   assert.ok(args.includes('-c:s'));
   assert.ok(args.includes('mov_text'));
+  assert.ok(args.includes('-movflags'));
+  assert.ok(args.includes('+faststart+use_metadata_tags'));
 });
 
 test('playback compatibility args can retry without subtitles', () => {

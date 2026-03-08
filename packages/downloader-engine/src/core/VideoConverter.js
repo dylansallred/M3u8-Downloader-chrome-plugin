@@ -106,9 +106,14 @@ function buildPlaybackCompatibilityArgs({ job, inputPath, outputPath, withSubs =
     '-preset', 'veryfast',
     '-crf', '18',
     '-pix_fmt', 'yuv420p',
+    '-profile:v', 'high',
+    '-level:v', '4.1',
+    '-vsync', 'cfr',
+    '-video_track_timescale', '90000',
     '-c:a', 'aac',
     '-b:a', '192k',
-    '-af', 'aresample=async=1:first_pts=0',
+    '-ar', '48000',
+    '-af', 'aresample=async=1000:first_pts=0',
   );
 
   if (withSubs) {
@@ -116,7 +121,7 @@ function buildPlaybackCompatibilityArgs({ job, inputPath, outputPath, withSubs =
   }
 
   args.push(
-    '-movflags', '+faststart',
+    '-movflags', '+faststart+use_metadata_tags',
     '-max_interleave_delta', '0',
     ...metadataArgs,
     outputPath,
