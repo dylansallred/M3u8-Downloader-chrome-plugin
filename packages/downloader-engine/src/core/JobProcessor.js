@@ -3,7 +3,8 @@ const path = require('path');
 const { spawn, spawnSync } = require('child_process');
 const { fetchText, parseM3U8, requestWithRedirects } = require('./PlaylistUtils');
 const { getRetryBackoffMs, downloadSegment } = require('./SegmentDownloader');
-const { remuxAndGenerateThumbnails } = require('./VideoConverter');
+const { buildNativeHlsArgs, inspectHlsPlaylist, shouldPreferNativeHlsDownload } = require('./HlsNativeDownload');
+const { generateThumbnailFromMp4, remuxAndGenerateThumbnails } = require('./VideoConverter');
 const logger = require('../utils/logger');
 
 function createJobProcessor({
@@ -700,6 +701,179 @@ function createJobProcessor({
     }
   }
 
+  async function runNativeHlsJob(job, playlistUrl, playlistInfo) {
+    if (!job || !playlistUrl) {
+      throw new Error('Missing playlist URL for native HLS download');
+    }
+    if (!FFMPEG_PATH) {
+      throw new Error('FFmpeg not available');
+    }
+
+    const outputDir = job.storageDir || (job.filePath ? path.dirname(job.filePath) : downloadDir);
+    await fsPromises.mkdir(outputDir, { recursive: true });
+    job.storageDir = outputDir;
+
+    const mp4Path = path.join(outputDir, `${job.id}-${job.downloadNameMp4}`);
+    const tempMp4Path = `${mp4Path}.part`;
+    const estimatedDurationSeconds = Number(playlistInfo && playlistInfo.totalDurationSeconds) || 0;
+    const nativeArgs = buildNativeHlsArgs({
+      job,
+      playlistUrl,
+      outputPath: tempMp4Path,
+      headers: job.headers || {},
+    });
+
+    job.status = 'downloading';
+    job.updatedAt = Date.now();
+    job.progress = 0;
+    job.bytesDownloaded = 0;
+    job.totalBytes = 0;
+    job.speedBps = 0;
+    job.etaSeconds = estimatedDurationSeconds > 0 ? Math.round(estimatedDurationSeconds) : null;
+    job.threadStates = [];
+    job.segmentStates = {};
+    job.failedSegments = [];
+
+    const parseProgressLine = (line) => {
+      const text = String(line || '').trim();
+      if (!text) return;
+      const [rawKey, ...rest] = text.split('=');
+      if (!rawKey || rest.length === 0) return;
+      const key = rawKey.trim();
+      const value = rest.join('=').trim();
+
+      if (key === 'total_size') {
+        const totalSize = Number.parseInt(value, 10);
+        if (Number.isFinite(totalSize) && totalSize >= 0) {
+          job.bytesDownloaded = totalSize;
+        }
+      }
+
+      if (key === 'out_time_ms') {
+        const outTimeMs = Number.parseInt(value, 10);
+        if (Number.isFinite(outTimeMs) && outTimeMs >= 0 && estimatedDurationSeconds > 0) {
+          const playedSeconds = outTimeMs / 1_000_000;
+          const percent = Math.max(0, Math.min(99, Math.round((playedSeconds / estimatedDurationSeconds) * 100)));
+          job.progress = Math.max(Number(job.progress || 0), percent);
+          const remainingSeconds = Math.max(0, estimatedDurationSeconds - playedSeconds);
+          job.etaSeconds = Number.isFinite(remainingSeconds) ? Math.round(remainingSeconds) : null;
+        }
+      }
+
+      if (key === 'progress' && value === 'end') {
+        job.progress = 99;
+      }
+
+      job.updatedAt = Date.now();
+    };
+
+    let lastErrorSummary = '';
+    try {
+      await new Promise((resolve, reject) => {
+        const child = spawn(FFMPEG_PATH, nativeArgs, {
+          stdio: ['ignore', 'ignore', 'pipe'],
+        });
+
+        let progressBuffer = '';
+        const cancelPoll = setInterval(() => {
+          if (!job.cancelled || child.killed) return;
+          child.kill('SIGTERM');
+        }, 250);
+
+        const finalize = (cb) => {
+          clearInterval(cancelPoll);
+          cb();
+        };
+
+        if (child.stderr) {
+          child.stderr.on('data', (chunk) => {
+            const text = Buffer.from(chunk).toString('utf8');
+            if (!text) return;
+            lastErrorSummary = text
+              .split(/\r?\n/)
+              .map((line) => line.trim())
+              .filter(Boolean)
+              .slice(-8)
+              .join(' | ')
+              .slice(0, 1200);
+
+            progressBuffer += text;
+            const lines = progressBuffer.split(/\r?\n/);
+            progressBuffer = lines.pop() || '';
+            for (const line of lines) {
+              parseProgressLine(line);
+            }
+          });
+        }
+
+        child.on('error', (err) => finalize(() => reject(err)));
+        child.on('close', (code) => finalize(() => {
+          if (progressBuffer) {
+            parseProgressLine(progressBuffer);
+            progressBuffer = '';
+          }
+
+          if (job.cancelled) {
+            resolve();
+            return;
+          }
+
+          if (code === 0) {
+            resolve();
+            return;
+          }
+
+          reject(new Error(lastErrorSummary || `ffmpeg exited with code ${code}`));
+        }));
+      });
+    } catch (err) {
+      try {
+        await fsPromises.unlink(tempMp4Path);
+      } catch (_) {
+      }
+      throw err;
+    }
+
+    if (job.cancelled) {
+      try {
+        await fsPromises.unlink(tempMp4Path);
+      } catch (_) {
+      }
+      if (job.cleanupOnCancel) {
+        await cleanupCancelledHlsArtifacts(job, null, { preserveSegments: false });
+      }
+      job.status = 'cancelled';
+      job.updatedAt = Date.now();
+      return;
+    }
+
+    await fsPromises.rename(tempMp4Path, mp4Path);
+
+    try {
+      await generateThumbnailFromMp4(job, mp4Path, {
+        outputDir,
+        FFMPEG_PATH,
+        FFPROBE_PATH,
+        skipThumbnailGeneration: job.skipThumbnailGeneration !== false,
+      });
+    } catch (thumbErr) {
+      logger.warn('Thumbnail generation failed after native HLS ingest', {
+        jobId: job.id,
+        message: thumbErr && thumbErr.message,
+      });
+    }
+
+    job.mp4Path = mp4Path;
+    job.completedSegments = Number(playlistInfo && playlistInfo.totalSegments) || 0;
+    job.totalSegments = Number(playlistInfo && playlistInfo.totalSegments) || 0;
+    job.progress = 100;
+    job.speedBps = 0;
+    job.etaSeconds = 0;
+    job.status = 'completed';
+    job.error = null;
+    job.updatedAt = Date.now();
+  }
+
   async function concatenateSegmentsStreaming(job, segments, jobTempDir, maxPartBytes, options = {}) {
     const deleteTempSegments = options.deleteTempSegments !== false;
     const tsParts = [];
@@ -1081,13 +1255,46 @@ function createJobProcessor({
 
       const headers = job.headers || {};
       const { text: playlistText, finalUrl: playlistUrl } = await fetchText(job.url, headers);
-      const segments = parseM3U8(playlistText, playlistUrl || job.url);
-      job.totalSegments = segments.length;
+      const playlistInfo = inspectHlsPlaylist(playlistText, playlistUrl || job.url);
+      const segments = playlistInfo.segments.length > 0
+        ? playlistInfo.segments
+        : parseM3U8(playlistText, playlistUrl || job.url);
+      job.totalSegments = playlistInfo.totalSegments || segments.length;
       job.status = 'downloading';
       job.failedSegments = [];
       job.threadStates = [];
       job.segmentStates = {};
       job.updatedAt = Date.now();
+
+      if (FFMPEG_PATH && shouldPreferNativeHlsDownload(playlistInfo)) {
+        logger.info('Using native FFmpeg HLS ingest for advanced playlist', {
+          jobId: job.id,
+          playlistUrl: playlistUrl || job.url,
+          totalSegments: playlistInfo.totalSegments,
+          isMasterPlaylist: playlistInfo.isMasterPlaylist,
+          hasDiscontinuity: playlistInfo.hasDiscontinuity,
+          hasMap: playlistInfo.hasMap,
+          hasByteRange: playlistInfo.hasByteRange,
+          hasFmp4Segments: playlistInfo.hasFmp4Segments,
+        });
+        try {
+          await runNativeHlsJob(job, playlistUrl || job.url, playlistInfo);
+          return;
+        } catch (nativeErr) {
+          logger.warn('Native FFmpeg HLS ingest failed; falling back to segmented downloader', {
+            jobId: job.id,
+            message: nativeErr && nativeErr.message,
+          });
+          job.progress = 0;
+          job.bytesDownloaded = 0;
+          job.totalBytes = 0;
+          job.speedBps = 0;
+          job.etaSeconds = null;
+          job.threadStates = [];
+          job.segmentStates = {};
+          job.failedSegments = [];
+        }
+      }
 
       // Initialize all segments as pending
       for (let i = 0; i < segments.length; i++) {

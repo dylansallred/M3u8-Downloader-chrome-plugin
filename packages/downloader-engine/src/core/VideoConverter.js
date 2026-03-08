@@ -85,6 +85,125 @@ function buildRemuxArgs({ job, input, mp4Path, withSubs }) {
   return args;
 }
 
+async function generateThumbnailFromMp4(job, mp4Path, {
+  outputDir,
+  FFMPEG_PATH,
+  FFPROBE_PATH,
+  skipThumbnailGeneration = false,
+}) {
+  const hasEarlyThumbnails =
+    Array.isArray(job.thumbnailPaths) &&
+    job.thumbnailPaths.length >= 5 &&
+    job.thumbnailPaths.every((p) => fs.existsSync(p));
+
+  if (hasEarlyThumbnails || skipThumbnailGeneration) {
+    const thumbnailCount = Array.isArray(job.thumbnailPaths) ? job.thumbnailPaths.length : 0;
+    logger.info('Skipping MP4 thumbnail generation', {
+      jobId: job.id,
+      reason: skipThumbnailGeneration ? 'skipThumbnailGeneration' : 'earlyThumbnailsAlreadyPresent',
+      thumbnailCount,
+    });
+    return;
+  }
+
+  logger.info('Starting thumbnail generation from MP4', { jobId: job.id });
+
+  let duration = 0;
+  if (!FFPROBE_PATH) {
+    logger.warn('FFprobe not available - skipping duration-based thumbnail positions', { jobId: job.id });
+  } else {
+    duration = await new Promise((resolve, reject) => {
+      logger.info('Starting ffprobe to read duration', {
+        jobId: job.id,
+        mp4Path,
+        ffprobePath: FFPROBE_PATH,
+      });
+      const ffprobe = spawn(FFPROBE_PATH, [
+        '-v', 'error',
+        '-show_entries', 'format=duration',
+        '-of', 'default=noprint_wrappers=1:nokey=1',
+        mp4Path,
+      ]);
+      let output = '';
+      ffprobe.stdout.on('data', (data) => {
+        output += data.toString();
+      });
+      ffprobe.on('error', (err) => {
+        logger.warn('ffprobe spawn error during duration read', {
+          jobId: job.id,
+          message: err && err.message,
+        });
+        reject(err);
+      });
+      ffprobe.on('exit', (code) => {
+        if (code === 0) {
+          const parsed = parseFloat(output.trim());
+          resolve(Number.isFinite(parsed) ? parsed : 0);
+        } else {
+          logger.warn('ffprobe exited with non-zero code', {
+            jobId: job.id,
+            code,
+            rawOutput: output,
+          });
+          reject(new Error(`ffprobe exited with code ${code}`));
+        }
+      });
+    });
+  }
+
+  logger.info('Thumbnail generation source duration', {
+    jobId: job.id,
+    durationSeconds: duration,
+  });
+
+  const seekTime = duration > 0 ? Math.min(duration * 0.1, 5) : 1;
+  const thumbPath = path.join(outputDir, `${job.id}-thumb.jpg`);
+
+  logger.info('Extracting thumbnail frame', {
+    jobId: job.id,
+    seekTime,
+    thumbPath,
+  });
+
+  await new Promise((resolve) => {
+    const ffThumb = spawn(FFMPEG_PATH, [
+      '-ss', String(seekTime),
+      '-i', mp4Path,
+      '-vframes', '1',
+      '-q:v', '4',
+      '-vf', 'scale=320:-2',
+      '-y',
+      thumbPath,
+    ], { stdio: 'ignore' });
+
+    ffThumb.on('error', (err) => {
+      logger.warn('ffmpeg thumbnail spawn error', {
+        jobId: job.id,
+        message: err && err.message,
+      });
+      resolve();
+    });
+
+    ffThumb.on('exit', (code, signal) => {
+      if (code === 0) {
+        logger.info('Thumbnail extracted successfully', {
+          jobId: job.id,
+          thumbPath,
+          seekTime,
+        });
+        job.thumbnailPath = thumbPath;
+      } else {
+        logger.warn('ffmpeg thumbnail extraction exited with non-zero code', {
+          jobId: job.id,
+          code,
+          signal,
+        });
+      }
+      resolve();
+    });
+  });
+}
+
 async function remuxAndGenerateThumbnails(job, filePathFinal, {
   downloadDir,
   FFMPEG_PATH,
@@ -262,121 +381,14 @@ async function remuxAndGenerateThumbnails(job, filePathFinal, {
     }
     job.mp4Path = mp4Path;
 
-    const hasEarlyThumbnails =
-      Array.isArray(job.thumbnailPaths) &&
-      job.thumbnailPaths.length >= 5 &&
-      job.thumbnailPaths.every((p) => fs.existsSync(p));
-
     // IMPORTANT: failure in the thumbnail step should not be treated as a remux failure.
     try {
-      if (!hasEarlyThumbnails && !skipThumbnailGeneration) {
-        logger.info('Starting thumbnail generation from MP4', { jobId: job.id });
-
-        let duration = 0;
-        if (!FFPROBE_PATH) {
-          logger.warn('FFprobe not available - skipping duration-based thumbnail positions', { jobId: job.id });
-        } else {
-          duration = await new Promise((resolve, reject) => {
-            logger.info('Starting ffprobe to read duration', {
-              jobId: job.id,
-              mp4Path,
-              ffprobePath: FFPROBE_PATH,
-            });
-            const ffprobe = spawn(FFPROBE_PATH, [
-              '-v', 'error',
-              '-show_entries', 'format=duration',
-              '-of', 'default=noprint_wrappers=1:nokey=1',
-              mp4Path,
-            ]);
-            let output = '';
-            ffprobe.stdout.on('data', (data) => {
-              output += data.toString();
-            });
-            ffprobe.on('error', (err) => {
-              logger.warn('ffprobe spawn error during duration read', {
-                jobId: job.id,
-                message: err && err.message,
-              });
-              reject(err);
-            });
-            ffprobe.on('exit', (code) => {
-              if (code === 0) {
-                const dur = parseFloat(output.trim());
-                resolve(isNaN(dur) ? 0 : dur);
-              } else {
-                logger.warn('ffprobe exited with non-zero code', {
-                  jobId: job.id,
-                  code,
-                  rawOutput: output,
-                });
-                reject(new Error(`ffprobe exited with code ${code}`));
-              }
-            });
-          });
-        }
-
-        logger.info('Thumbnail generation source duration', {
-          jobId: job.id,
-          durationSeconds: duration,
-        });
-
-        // Extract a single representative frame from the MP4.
-        // Seek to 10% into the video or 5 seconds (whichever is less) so we
-        // land past title cards but don't overshoot short clips.
-        const seekTime = duration > 0 ? Math.min(duration * 0.1, 5) : 1;
-        const thumbPath = path.join(outputDir, `${job.id}-thumb.jpg`);
-
-        logger.info('Extracting thumbnail frame', {
-          jobId: job.id,
-          seekTime,
-          thumbPath,
-        });
-
-        await new Promise((resolve) => {
-          const ffThumb = spawn(FFMPEG_PATH, [
-            '-ss', String(seekTime),
-            '-i', mp4Path,
-            '-vframes', '1',
-            '-q:v', '4',
-            '-vf', 'scale=320:-2',
-            '-y',
-            thumbPath,
-          ], { stdio: 'ignore' });
-
-          ffThumb.on('error', (err) => {
-            logger.warn('ffmpeg thumbnail spawn error', {
-              jobId: job.id,
-              message: err && err.message,
-            });
-            resolve(); // Non-fatal: continue without thumbnail
-          });
-
-          ffThumb.on('exit', (code, signal) => {
-            if (code === 0) {
-              logger.info('Thumbnail extracted successfully', {
-                jobId: job.id,
-                thumbPath,
-                seekTime,
-              });
-              job.thumbnailPath = thumbPath;
-            } else {
-              logger.warn('ffmpeg thumbnail extraction exited with non-zero code', {
-                jobId: job.id,
-                code,
-                signal,
-              });
-            }
-            resolve(); // Non-fatal either way
-          });
-        });
-      } else {
-        const thumbnailCount = Array.isArray(job.thumbnailPaths) ? job.thumbnailPaths.length : 0;
-        logger.info('Skipping MP4 thumbnail generation', {
-          jobId: job.id,
-          reason: skipThumbnailGeneration ? 'skipThumbnailGeneration' : 'earlyThumbnailsAlreadyPresent',
-          thumbnailCount,
-        });
-      }
+      await generateThumbnailFromMp4(job, mp4Path, {
+        outputDir,
+        FFMPEG_PATH,
+        FFPROBE_PATH,
+        skipThumbnailGeneration,
+      });
     } catch (thumbErr) {
       logger.warn('Thumbnail generation failed (remux kept)', {
         jobId: job.id,
@@ -456,6 +468,7 @@ async function remuxAndGenerateThumbnails(job, filePathFinal, {
 }
 
 module.exports = {
+  generateThumbnailFromMp4,
   remuxAndGenerateThumbnails,
   __test: {
     buildRemuxArgs,
