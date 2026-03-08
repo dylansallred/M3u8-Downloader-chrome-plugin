@@ -122,13 +122,30 @@ async function remuxAndGenerateThumbnails(job, filePathFinal, {
         ];
       }
 
-      const ff = spawn(FFMPEG_PATH, args, { stdio: 'ignore' });
+      const stderrChunks = [];
+      const ff = spawn(FFMPEG_PATH, args, { stdio: ['ignore', 'ignore', 'pipe'] });
+      if (ff.stderr) {
+        ff.stderr.on('data', (chunk) => {
+          if (!chunk) return;
+          stderrChunks.push(Buffer.from(chunk).toString('utf8'));
+        });
+      }
+      const summarizeStderr = () => stderrChunks
+        .join('')
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .slice(-8)
+        .join(' | ')
+        .slice(0, 1200);
       ff.on('error', (err) => {
+        const stderrSummary = summarizeStderr();
         logger.warn('ffmpeg spawn error during remux', {
           jobId: job.id,
           message: err && err.message,
+          stderrSummary,
         });
-        reject(err);
+        reject(new Error(stderrSummary ? `${err.message} (${stderrSummary})` : err.message));
       });
       ff.on('exit', (code, signal) => {
         if (code === 0) {
@@ -144,18 +161,24 @@ async function remuxAndGenerateThumbnails(job, filePathFinal, {
           }
           resolve();
         } else {
+          const stderrSummary = summarizeStderr();
           logger.warn('ffmpeg remux exited with non-zero code', {
             jobId: job.id,
             code,
             signal,
             withSubs,
+            stderrSummary,
           });
           if (concatListPath) {
             try {
               fs.unlinkSync(concatListPath);
             } catch (_) {}
           }
-          reject(new Error(`ffmpeg exited with code ${code}`));
+          reject(new Error(
+            stderrSummary
+              ? `ffmpeg exited with code ${code}: ${stderrSummary}`
+              : `ffmpeg exited with code ${code}`
+          ));
         }
       });
     });
@@ -347,14 +370,21 @@ async function remuxAndGenerateThumbnails(job, filePathFinal, {
         mp4Path,
       });
     }
+    return { ok: true, usedTsFallback: false, error: null };
   } catch (err) {
+    const message = err && err.message ? err.message : 'Unknown remux failure';
     logger.warn('TS->MP4 remux failed (using TS as fallback)', {
       jobId: job.id,
-      message: err && err.message,
+      message,
       stack: err && err.stack,
     });
     job.mp4Path = null;
     job.thumbnailPath = null;
+    return {
+      ok: false,
+      usedTsFallback: true,
+      error: `MP4 remux failed, kept TS output: ${message}`,
+    };
   }
 }
 

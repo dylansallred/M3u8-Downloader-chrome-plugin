@@ -1495,22 +1495,28 @@ function createJobProcessor({
         });
       }
 
-      await remuxAndGenerateThumbnails(job, filePathFinal, {
+      const remuxResult = await remuxAndGenerateThumbnails(job, filePathFinal, {
         downloadDir,
         FFMPEG_PATH,
         FFPROBE_PATH,
         skipThumbnailGeneration: job.skipThumbnailGeneration !== false,
       });
+      if (remuxResult && remuxResult.usedTsFallback && remuxResult.error) {
+        job.error = remuxResult.error;
+      }
 
       if (job.cancelled) {
         job.status = 'cancelled';
       } else if (job.failedSegments.length > 0 && job.completedSegments === 0) {
         job.status = 'error';
         job.error = 'All segments failed to download.';
+      } else if (remuxResult && remuxResult.usedTsFallback) {
+        job.status = 'completed-with-errors';
       } else if (job.failedSegments.length > 0) {
         job.status = 'completed-with-errors';
       } else {
         job.status = 'completed';
+        job.error = null;
       }
       if (job.status === 'completed' || job.status === 'completed-with-errors' || job.status === 'error') {
         if (job.totalSegments && job.completedSegments > 0) {
