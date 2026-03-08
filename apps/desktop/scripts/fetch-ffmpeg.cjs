@@ -23,15 +23,15 @@ function resolveUrls() {
   if (platform === 'darwin') {
     const isArm64 = process.arch === 'arm64';
     return {
-      // evermeet only publishes Intel macOS binaries; Apple Silicon needs a native arm64 source.
+      // evermeet only publishes Intel macOS binaries; Apple Silicon uses GitHub-hosted native arm64 binaries.
       ffmpegUrl: ffmpegExplicit || (
         isArm64
-          ? 'https://www.osxexperts.net/ffmpeg80arm.zip'
+          ? 'https://github.com/eugeneware/ffmpeg-static/releases/download/b6.1.1/ffmpeg-darwin-arm64'
           : 'https://evermeet.cx/ffmpeg/getrelease/ffmpeg'
       ),
       ffprobeUrl: ffprobeExplicit || (
         isArm64
-          ? 'https://www.osxexperts.net/ffprobe80arm.zip'
+          ? 'https://github.com/eugeneware/ffmpeg-static/releases/download/b6.1.1/ffprobe-darwin-arm64'
           : 'https://evermeet.cx/ffmpeg/getrelease/ffprobe'
       ),
     };
@@ -255,17 +255,28 @@ async function run() {
   fs.mkdirSync(outputDir, { recursive: true });
 
   if (isDarwinArm64 && !process.env.FFMPEG_DOWNLOAD_URL && !process.env.FFPROBE_DOWNLOAD_URL) {
-    const copiedFromSystem = tryCopySystemBinary(ffmpegPath, ffmpegName)
-      && tryCopySystemBinary(ffprobePath, ffprobeName);
-    if (!copiedFromSystem) {
-      const installed = installHomebrewFfmpegIfNeeded();
-      const copiedAfterInstall = installed
-        && tryCopySystemBinary(ffmpegPath, ffmpegName)
+    const { ffmpegUrl, ffprobeUrl } = resolveUrls();
+    try {
+      console.log(`[fetch-ffmpeg] Downloading ffmpeg from: ${ffmpegUrl}`);
+      await downloadWithRedirects(ffmpegUrl, ffmpegPath);
+      extractArchiveIfNeeded(ffmpegPath, ffmpegName);
+      console.log(`[fetch-ffmpeg] Downloading ffprobe from: ${ffprobeUrl}`);
+      await downloadWithRedirects(ffprobeUrl, ffprobePath);
+      extractArchiveIfNeeded(ffprobePath, ffprobeName);
+    } catch (downloadErr) {
+      console.warn(`[fetch-ffmpeg] Native macOS arm64 download failed, falling back to system tools: ${downloadErr && downloadErr.message ? downloadErr.message : downloadErr}`);
+      const copiedFromSystem = tryCopySystemBinary(ffmpegPath, ffmpegName)
         && tryCopySystemBinary(ffprobePath, ffprobeName);
-      if (!copiedAfterInstall) {
-        throw new Error(
-          'Unable to obtain native macOS arm64 ffmpeg/ffprobe. Install ffmpeg with Homebrew or set FFMPEG_DOWNLOAD_URL and FFPROBE_DOWNLOAD_URL.'
-        );
+      if (!copiedFromSystem) {
+        const installed = installHomebrewFfmpegIfNeeded();
+        const copiedAfterInstall = installed
+          && tryCopySystemBinary(ffmpegPath, ffmpegName)
+          && tryCopySystemBinary(ffprobePath, ffprobeName);
+        if (!copiedAfterInstall) {
+          throw new Error(
+            'Unable to obtain native macOS arm64 ffmpeg/ffprobe. Download failed and no usable system/Homebrew binaries were found.'
+          );
+        }
       }
     }
   } else {
