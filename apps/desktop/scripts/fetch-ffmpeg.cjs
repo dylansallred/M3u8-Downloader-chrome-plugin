@@ -123,6 +123,16 @@ function canExecuteBinary(binaryPath) {
   return probe.status === 0;
 }
 
+function ensureExecutablePermissions(binaryPath) {
+  if (isWindows) return;
+  try {
+    if (binaryPath && fs.existsSync(binaryPath)) {
+      fs.chmodSync(binaryPath, 0o755);
+    }
+  } catch {
+  }
+}
+
 function findExecutableInPath(command) {
   const probe = spawnSync('which', [command], {
     stdio: ['ignore', 'pipe', 'ignore'],
@@ -197,6 +207,7 @@ function tryCopySystemBinary(targetPath, binaryName) {
 }
 
 function extractArchiveIfNeeded(binaryPath, expectedName) {
+  ensureExecutablePermissions(binaryPath);
   if (canExecuteBinary(binaryPath)) {
     return;
   }
@@ -245,6 +256,7 @@ function extractArchiveIfNeeded(binaryPath, expectedName) {
 
   fs.copyFileSync(candidates[0], binaryPath);
   fs.rmSync(extractDir, { recursive: true, force: true });
+  ensureExecutablePermissions(binaryPath);
 
   if (!canExecuteBinary(binaryPath)) {
     throw new Error(`Extracted binary still not executable: ${binaryPath}`);
@@ -290,8 +302,8 @@ async function run() {
   }
 
   if (!isWindows) {
-    fs.chmodSync(ffmpegPath, 0o755);
-    fs.chmodSync(ffprobePath, 0o755);
+    ensureExecutablePermissions(ffmpegPath);
+    ensureExecutablePermissions(ffprobePath);
   }
 
   const ffmpegStat = fs.statSync(ffmpegPath);
