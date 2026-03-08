@@ -85,6 +85,161 @@ function buildRemuxArgs({ job, input, mp4Path, withSubs }) {
   return args;
 }
 
+function buildPlaybackCompatibilityArgs({ job, inputPath, outputPath, withSubs = true }) {
+  const metadataArgs = buildFfmpegMetadataArgs(job);
+  const args = [
+    '-y',
+    '-fflags', '+genpts+discardcorrupt',
+    '-err_detect', 'ignore_err',
+    '-avoid_negative_ts', 'make_zero',
+    '-i', inputPath,
+    '-map', '0:v?',
+    '-map', '0:a?',
+  ];
+
+  if (withSubs) {
+    args.push('-map', '0:s?');
+  }
+
+  args.push(
+    '-c:v', 'libx264',
+    '-preset', 'veryfast',
+    '-crf', '18',
+    '-pix_fmt', 'yuv420p',
+    '-c:a', 'aac',
+    '-b:a', '192k',
+    '-af', 'aresample=async=1:first_pts=0',
+  );
+
+  if (withSubs) {
+    args.push('-c:s', 'mov_text');
+  }
+
+  args.push(
+    '-movflags', '+faststart',
+    '-max_interleave_delta', '0',
+    ...metadataArgs,
+    outputPath,
+  );
+
+  return args;
+}
+
+async function normalizeMp4ForPlayback(job, mp4Path, {
+  FFMPEG_PATH,
+}) {
+  if (!job || !mp4Path || !FFMPEG_PATH || job.forcePlaybackCompatibility === false) {
+    return { ok: false, skipped: true };
+  }
+
+  const tempOutputPath = `${mp4Path}.normalize.part`;
+  const backupPath = `${mp4Path}.pre-normalize.bak`;
+  let normalizationError = null;
+
+  const runFfmpeg = (withSubs) => new Promise((resolve, reject) => {
+    const args = buildPlaybackCompatibilityArgs({
+      job,
+      inputPath: mp4Path,
+      outputPath: tempOutputPath,
+      withSubs,
+    });
+    const stderrChunks = [];
+    const ff = spawn(FFMPEG_PATH, args, { stdio: ['ignore', 'ignore', 'pipe'] });
+
+    if (ff.stderr) {
+      ff.stderr.on('data', (chunk) => {
+        if (!chunk) return;
+        stderrChunks.push(Buffer.from(chunk).toString('utf8'));
+      });
+    }
+
+    const summarizeStderr = () => stderrChunks
+      .join('')
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .slice(-8)
+      .join(' | ')
+      .slice(0, 1200);
+
+    ff.on('error', (err) => {
+      const stderrSummary = summarizeStderr();
+      reject(new Error(stderrSummary ? `${err.message} (${stderrSummary})` : err.message));
+    });
+
+    ff.on('exit', (code) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+
+      const stderrSummary = summarizeStderr();
+      reject(new Error(
+        stderrSummary
+          ? `ffmpeg exited with code ${code}: ${stderrSummary}`
+          : `ffmpeg exited with code ${code}`
+      ));
+    });
+  });
+
+  logger.info('Starting playback compatibility normalization', {
+    jobId: job.id,
+    mp4Path,
+  });
+
+  try {
+    try {
+      await runFfmpeg(true);
+    } catch (err) {
+      normalizationError = err;
+      logger.warn('Playback compatibility normalization failed with subtitles; retrying without subtitles', {
+        jobId: job.id,
+        message: err && err.message,
+      });
+      try {
+        fs.unlinkSync(tempOutputPath);
+      } catch (_) {}
+      await runFfmpeg(false);
+    }
+
+    try {
+      fs.unlinkSync(backupPath);
+    } catch (_) {}
+
+    await fs.promises.rename(mp4Path, backupPath);
+    try {
+      await fs.promises.rename(tempOutputPath, mp4Path);
+      await fs.promises.unlink(backupPath);
+    } catch (swapErr) {
+      try {
+        await fs.promises.rename(backupPath, mp4Path);
+      } catch (_) {}
+      throw swapErr;
+    }
+
+    logger.info('Playback compatibility normalization completed', {
+      jobId: job.id,
+      mp4Path,
+    });
+    return { ok: true, skipped: false };
+  } catch (err) {
+    try {
+      fs.unlinkSync(tempOutputPath);
+    } catch (_) {}
+    logger.warn('Playback compatibility normalization failed; keeping original MP4', {
+      jobId: job.id,
+      mp4Path,
+      message: err && err.message,
+      previousError: normalizationError && normalizationError.message,
+    });
+    return {
+      ok: false,
+      skipped: false,
+      error: err,
+    };
+  }
+}
+
 async function generateThumbnailFromMp4(job, mp4Path, {
   outputDir,
   FFMPEG_PATH,
@@ -381,6 +536,10 @@ async function remuxAndGenerateThumbnails(job, filePathFinal, {
     }
     job.mp4Path = mp4Path;
 
+    if (job.forcePlaybackCompatibility !== false) {
+      await normalizeMp4ForPlayback(job, mp4Path, { FFMPEG_PATH });
+    }
+
     // IMPORTANT: failure in the thumbnail step should not be treated as a remux failure.
     try {
       await generateThumbnailFromMp4(job, mp4Path, {
@@ -469,8 +628,10 @@ async function remuxAndGenerateThumbnails(job, filePathFinal, {
 
 module.exports = {
   generateThumbnailFromMp4,
+  normalizeMp4ForPlayback,
   remuxAndGenerateThumbnails,
   __test: {
+    buildPlaybackCompatibilityArgs,
     buildRemuxArgs,
     resolveRemuxInput,
   },

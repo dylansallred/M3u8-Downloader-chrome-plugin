@@ -271,6 +271,7 @@ function registerJobRoutes(
       skipThumbnailGeneration: false,
       tmdbMetadata: null,
       downloadNameMp4,
+      forcePlaybackCompatibility: isHls,
       cancelled: false,
       maxConcurrent: clampedThreads,
       maxSegmentAttempts: (() => {

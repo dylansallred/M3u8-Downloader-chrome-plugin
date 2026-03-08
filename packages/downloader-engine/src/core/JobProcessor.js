@@ -9,7 +9,7 @@ const {
   inspectHlsPlaylist,
   shouldPreferNativeHlsDownload,
 } = require('./HlsNativeDownload');
-const { generateThumbnailFromMp4, remuxAndGenerateThumbnails } = require('./VideoConverter');
+const { generateThumbnailFromMp4, normalizeMp4ForPlayback, remuxAndGenerateThumbnails } = require('./VideoConverter');
 const logger = require('../utils/logger');
 
 function createJobProcessor({
@@ -853,6 +853,10 @@ function createJobProcessor({
     }
 
     await fsPromises.rename(tempMp4Path, mp4Path);
+
+    if (job.forcePlaybackCompatibility !== false) {
+      await normalizeMp4ForPlayback(job, mp4Path, { FFMPEG_PATH });
+    }
 
     try {
       await generateThumbnailFromMp4(job, mp4Path, {

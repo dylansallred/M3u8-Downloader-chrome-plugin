@@ -78,6 +78,11 @@ class QueueManager {
         if (!queuedJob.storageDir && queuedJob.filePath) {
           queuedJob.storageDir = path.dirname(queuedJob.filePath);
         }
+        if (typeof queuedJob.forcePlaybackCompatibility !== 'boolean') {
+          queuedJob.forcePlaybackCompatibility = /\.m3u8(\?|$)/i.test(
+            queuedJob.originalHlsUrl || queuedJob.url || ''
+          );
+        }
         if (
           queuedJob.queueStatus === 'downloading'
           || queuedJob.status === 'downloading'
@@ -395,6 +400,7 @@ class QueueManager {
           subtitlePath: job.subtitlePath,
           subtitleZipPath: job.subtitleZipPath,
           subtitleMeta: job.subtitleMeta,
+          forcePlaybackCompatibility: !!job.forcePlaybackCompatibility,
           fallbackUrl: job.fallbackUrl,
           directFallbackFilePath: job.directFallbackFilePath,
           directFallbackDownloadName: job.directFallbackDownloadName,

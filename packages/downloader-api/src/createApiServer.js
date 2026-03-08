@@ -698,6 +698,7 @@ function createApiServer(options = {}) {
       mediaHints,
       youtubeMetadata: queueYoutubeMetadata,
       downloadNameMp4,
+      forcePlaybackCompatibility: isHls,
       fallbackUrl: fallbackMediaUrl || null,
       originalHlsUrl: isHls ? queue.url : null,
       originalHlsDownloadName: isHls ? tsName : null,
