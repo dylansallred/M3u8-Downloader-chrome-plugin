@@ -10,9 +10,9 @@ import { resolveThumbnailUrl, extractYear } from '@/lib/utils';
 interface HistoryItemCardProps {
   item: HistoryItem;
   apiBase: string;
-  onOpenFile: (fileName: string) => void;
-  onOpenFolder: (fileName: string) => void;
-  onDelete: (fileName: string) => void;
+  onOpenFile: (item: HistoryItem) => void;
+  onOpenFolder: (item: HistoryItem) => void;
+  onDelete: (item: HistoryItem) => void;
 }
 
 function deriveTitle(item: HistoryItem): string {
@@ -82,7 +82,7 @@ export function HistoryItemCard({ item, apiBase, onOpenFile, onOpenFolder, onDel
             size="icon-sm"
             variant="ghost"
             title="Open File"
-            onClick={() => onOpenFile(item.fileName)}
+            onClick={() => onOpenFile(item)}
           >
             <Play className="size-3.5" />
           </Button>
@@ -90,7 +90,7 @@ export function HistoryItemCard({ item, apiBase, onOpenFile, onOpenFolder, onDel
             size="icon-sm"
             variant="ghost"
             title="Open Folder"
-            onClick={() => onOpenFolder(item.fileName)}
+            onClick={() => onOpenFolder(item)}
           >
             <FolderOpen className="size-3.5" />
           </Button>
@@ -101,7 +101,7 @@ export function HistoryItemCard({ item, apiBase, onOpenFile, onOpenFolder, onDel
             asChild
           >
             <a
-              href={`${apiBase}/api/history/stream/${encodeURIComponent(item.fileName)}`}
+              href={`${apiBase}/api/history/stream/${encodeURIComponent(item.id)}`}
               target="_blank"
               rel="noreferrer"
             >
@@ -113,7 +113,7 @@ export function HistoryItemCard({ item, apiBase, onOpenFile, onOpenFolder, onDel
             variant="ghost"
             className="text-destructive/50 hover:text-destructive hover:bg-destructive-muted"
             title="Delete"
-            onClick={() => onDelete(item.fileName)}
+            onClick={() => onDelete(item)}
           >
             <Trash2 className="size-3.5" />
           </Button>

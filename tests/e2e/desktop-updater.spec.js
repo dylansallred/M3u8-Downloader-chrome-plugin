@@ -1067,12 +1067,12 @@ test('desktop history supports search/filter and open file/folder actions', asyn
         getUpdaterState: async () => ({ ...state.updater }),
         checkForUpdates: async () => ({ ok: true }),
         installUpdateNow: async () => ({ ok: true }),
-        openHistoryFile: async (fileName) => {
-          window.__historyOpenedFile = fileName;
-          return { ok: true, filePath: `/tmp/${fileName}` };
+        openHistoryFile: async (historyId) => {
+          window.__historyOpenedFile = historyId;
+          return { ok: true, filePath: `/tmp/${historyId}` };
         },
-        openHistoryFolder: async (fileName) => {
-          window.__historyOpenedFolder = fileName;
+        openHistoryFolder: async (historyId) => {
+          window.__historyOpenedFolder = historyId;
           return { ok: true, folderPath: '/tmp' };
         },
         onUpdaterEvent: (cb) => {
@@ -1100,16 +1100,20 @@ test('desktop history supports search/filter and open file/folder actions', asyn
         body: JSON.stringify({
           items: [
             {
-              id: 'a',
+              id: 'a-history-id',
               fileName: 'joba-sample-video.mp4',
+              relativePath: 'job-a/joba-sample-video.mp4',
+              absolutePath: '/tmp/job-a/joba-sample-video.mp4',
               label: 'sample-video.mp4',
               sizeBytes: 2 * 1024 * 1024,
               modifiedAt: Date.now(),
               ext: '.mp4',
             },
             {
-              id: 'b',
+              id: 'b-history-id',
               fileName: 'jobb-segment.ts',
+              relativePath: 'job-b/jobb-segment.ts',
+              absolutePath: '/tmp/job-b/jobb-segment.ts',
               label: 'segment.ts',
               sizeBytes: 1 * 1024 * 1024,
               modifiedAt: Date.now() - 1000,
@@ -1146,13 +1150,13 @@ test('desktop history supports search/filter and open file/folder actions', asyn
     await firstHistoryCard.getByRole('button', { name: 'Open File' }).click();
     await firstHistoryCard.getByRole('button', { name: 'Open Folder' }).click();
 
-    // Verify the IPC bridge was called with the correct filename
+    // Verify the IPC bridge was called with the correct history identifier
     const opened = await page.evaluate(() => ({
       file: window.__historyOpenedFile || null,
       folder: window.__historyOpenedFolder || null,
     }));
-    expect(opened.file).toBe('joba-sample-video.mp4');
-    expect(opened.folder).toBe('joba-sample-video.mp4');
+    expect(opened.file).toBe('a-history-id');
+    expect(opened.folder).toBe('a-history-id');
   } finally {
     await renderer.close();
   }

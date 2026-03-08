@@ -72,6 +72,58 @@ function decodeCursor(cursor) {
   }
 }
 
+function encodeHistoryItemId(value) {
+  const source = String(value || '').trim();
+  if (!source) return '';
+  return Buffer.from(source, 'utf8').toString('base64url');
+}
+
+function decodeHistoryItemId(value) {
+  const encoded = String(value || '').trim();
+  if (!encoded) return '';
+  try {
+    const decoded = Buffer.from(encoded, 'base64url').toString('utf8');
+    return Buffer.from(decoded, 'utf8').toString('base64url') === encoded
+      ? decoded
+      : '';
+  } catch {
+    return '';
+  }
+}
+
+function getHistoryItemLocator(item) {
+  if (!item || typeof item !== 'object') return '';
+  const absolutePath = typeof item.absolutePath === 'string' && item.absolutePath.trim()
+    ? item.absolutePath.trim()
+    : '';
+  const safeRelativePath = normalizeRelativePath(item.relativePath || item.fileName);
+  return safeRelativePath || absolutePath || String(item.fileName || '').trim();
+}
+
+function mergeHistoryItems(existingItem, incomingItem) {
+  if (!existingItem) return incomingItem;
+  if (!incomingItem) return existingItem;
+
+  return {
+    ...incomingItem,
+    ...existingItem,
+    id: existingItem.id || incomingItem.id,
+    fileName: existingItem.fileName || incomingItem.fileName,
+    relativePath: existingItem.relativePath || incomingItem.relativePath,
+    absolutePath: existingItem.absolutePath || incomingItem.absolutePath,
+    label: existingItem.label || incomingItem.label,
+    jobId: existingItem.jobId || incomingItem.jobId,
+    title: existingItem.title || incomingItem.title,
+    sizeBytes: Number(existingItem.sizeBytes || incomingItem.sizeBytes || 0),
+    modifiedAt: Math.max(Number(existingItem.modifiedAt || 0), Number(incomingItem.modifiedAt || 0)),
+    ext: existingItem.ext || incomingItem.ext,
+    thumbnailUrl: existingItem.thumbnailUrl || incomingItem.thumbnailUrl,
+    tmdbReleaseDate: existingItem.tmdbReleaseDate || incomingItem.tmdbReleaseDate || null,
+    tmdbMetadata: existingItem.tmdbMetadata || incomingItem.tmdbMetadata || null,
+    youtubeMetadata: existingItem.youtubeMetadata || incomingItem.youtubeMetadata || null,
+  };
+}
+
 function normalizeStoredItem(item) {
   if (!item || typeof item.fileName !== 'string') return null;
   const absolutePath = typeof item.absolutePath === 'string' && item.absolutePath.trim()
@@ -80,12 +132,27 @@ function normalizeStoredItem(item) {
   const rawRelativePath = item.relativePath || item.fileName;
   const safeRelativePath = normalizeRelativePath(rawRelativePath);
   if (!safeRelativePath && !absolutePath) return null;
-  return {
+  const normalized = {
     ...item,
-    id: safeRelativePath || absolutePath,
     fileName: path.basename(item.fileName),
     relativePath: safeRelativePath || item.fileName,
     absolutePath,
+  };
+  const storedId = typeof item.id === 'string' ? item.id.trim() : '';
+  const decodedStoredId = storedId ? decodeHistoryItemId(storedId) : '';
+  const nextId = (
+    decodedStoredId
+    && (
+      decodedStoredId === normalized.relativePath
+      || decodedStoredId === normalized.absolutePath
+      || decodedStoredId === normalized.fileName
+    )
+  )
+    ? storedId
+    : encodeHistoryItemId(getHistoryItemLocator(normalized));
+  return {
+    ...normalized,
+    id: nextId,
   };
 }
 
@@ -414,7 +481,7 @@ class HistoryIndexService {
     });
 
     return {
-      id: relativePath,
+      id: encodeHistoryItemId(mediaFile.absolutePath || relativePath),
       fileName,
       relativePath,
       absolutePath: mediaFile.absolutePath || mediaFile.fullPath,
@@ -466,11 +533,19 @@ class HistoryIndexService {
       const activeJobFiles = this.buildActiveJobFiles();
       const jobLookup = this.buildJobLookup();
 
-      const nextItems = [];
+      const nextItemsByLocator = new Map();
       for (const mediaFile of mediaFiles) {
         const item = this.buildItem(mediaFile, filesByDir, activeJobFiles, jobLookup);
-        if (item) nextItems.push(item);
+        if (!item) continue;
+
+        const locator = getHistoryItemLocator(item);
+        if (!locator) continue;
+
+        const existing = nextItemsByLocator.get(locator);
+        nextItemsByLocator.set(locator, mergeHistoryItems(existing, item));
       }
+
+      const nextItems = Array.from(nextItemsByLocator.values());
 
       nextItems.sort((a, b) => Number(b.modifiedAt || 0) - Number(a.modifiedAt || 0));
 
@@ -527,8 +602,32 @@ class HistoryIndexService {
     return this.items.find((item) => item.fileName === safeName) || null;
   }
 
-  resolveFilePath(fileName) {
-    const item = this.findByFileName(fileName);
+  findById(historyId) {
+    const safeId = String(historyId || '').trim();
+    if (!safeId) return null;
+
+    const exact = this.items.find((item) => item.id === safeId);
+    if (exact) return exact;
+
+    const decoded = decodeHistoryItemId(safeId);
+    if (!decoded) {
+      return this.findByFileName(safeId);
+    }
+
+    const safeRelative = normalizeRelativePath(decoded);
+    if (safeRelative) {
+      const byRelative = this.items.find((item) => item.relativePath === safeRelative);
+      if (byRelative) return byRelative;
+    }
+
+    const byAbsolute = this.items.find((item) => item.absolutePath === decoded);
+    if (byAbsolute) return byAbsolute;
+
+    return this.findByFileName(decoded);
+  }
+
+  resolveFilePath(historyId) {
+    const item = this.findById(historyId);
     if (!item) return null;
     if (item.absolutePath && fs.existsSync(item.absolutePath)) {
       return item.absolutePath;
@@ -541,11 +640,11 @@ class HistoryIndexService {
     return resolved;
   }
 
-  async removeByFileName(fileName) {
-    const safeName = path.basename(String(fileName || ''));
-    if (!safeName) return false;
+  async removeById(historyId) {
+    const item = this.findById(historyId);
+    if (!item) return false;
     const before = this.items.length;
-    this.items = this.items.filter((item) => item.fileName !== safeName);
+    this.items = this.items.filter((candidate) => candidate.id !== item.id);
     if (this.items.length === before) return false;
     await this.persistIndex();
     this.emitChange('delete');
@@ -576,4 +675,6 @@ class HistoryIndexService {
 
 module.exports = {
   HistoryIndexService,
+  decodeHistoryItemId,
+  encodeHistoryItemId,
 };

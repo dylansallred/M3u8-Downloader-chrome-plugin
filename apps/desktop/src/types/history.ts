@@ -1,6 +1,8 @@
 export interface HistoryItem {
   id: string;
   fileName: string;
+  relativePath?: string | null;
+  absolutePath?: string | null;
   label: string;
   jobId: string | null;
   title: string | null;

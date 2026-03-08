@@ -2,6 +2,7 @@ const path = require('path');
 const fs = require('fs');
 const logger = require('../utils/logger');
 const { historyFileParamValidation } = require('../utils/validators');
+const { decodeHistoryItemId } = require('../services/historyIndex');
 
 const HISTORY_MEDIA_EXTENSIONS = new Set([
   '.mp4',
@@ -179,11 +180,12 @@ function extractTrailingJobIdFromTempDirName(name) {
   return '';
 }
 
-async function resolveHistoryFilePath(fsPromises, historyIndex, downloadDir, safeName) {
-  if (!safeName) return null;
+async function resolveHistoryFilePath(fsPromises, historyIndex, downloadDir, historyId) {
+  const identifier = String(historyId || '').trim();
+  if (!identifier) return null;
 
   const indexResolved = historyIndex && typeof historyIndex.resolveFilePath === 'function'
-    ? historyIndex.resolveFilePath(safeName)
+    ? historyIndex.resolveFilePath(identifier)
     : null;
   if (indexResolved) {
     try {
@@ -193,6 +195,10 @@ async function resolveHistoryFilePath(fsPromises, historyIndex, downloadDir, saf
       // fall through
     }
   }
+
+  const decodedIdentifier = decodeHistoryItemId(identifier);
+  const safeName = path.basename(decodedIdentifier || identifier);
+  if (!safeName) return null;
 
   const directPath = path.join(downloadDir, safeName);
   try {
@@ -401,38 +407,40 @@ async function registerHistoryRoutes(app, historyIndex, fsPromises, downloadDir)
   });
 
   app.get('/api/history/file/:fileName', historyFileParamValidation, async (req, res) => {
-    const safeName = path.basename(req.params.fileName || '');
-    if (!safeName) {
+    const historyId = path.basename(req.params.fileName || '');
+    if (!historyId) {
       return res.status(400).send('Missing fileName');
     }
 
-    const fullPath = await resolveHistoryFilePath(fsPromises, historyIndex, downloadDir, safeName);
+    const fullPath = await resolveHistoryFilePath(fsPromises, historyIndex, downloadDir, historyId);
     if (!fullPath) {
-      logger.warn('History download requested for missing file', { fileName: safeName });
+      logger.warn('History download requested for missing file', { historyId });
       return res.status(404).send('File not found');
     }
 
+    const safeName = path.basename(fullPath);
     let downloadName = safeName;
     const dashIndex = safeName.indexOf('-');
     if (dashIndex > 0 && dashIndex < safeName.length - 1) {
       downloadName = safeName.slice(dashIndex + 1);
     }
 
-    logger.info('History file download started', { fileName: safeName, fullPath, downloadName });
+    logger.info('History file download started', { historyId, fileName: safeName, fullPath, downloadName });
     res.download(fullPath, downloadName);
   });
 
   app.get('/api/history/stream/:fileName', historyFileParamValidation, async (req, res) => {
-    const safeName = path.basename(req.params.fileName || '');
-    if (!safeName) {
+    const historyId = path.basename(req.params.fileName || '');
+    if (!historyId) {
       return res.status(400).send('Missing fileName');
     }
 
-    const fullPath = await resolveHistoryFilePath(fsPromises, historyIndex, downloadDir, safeName);
+    const fullPath = await resolveHistoryFilePath(fsPromises, historyIndex, downloadDir, historyId);
     if (!fullPath) {
       return res.status(404).send('File not found');
     }
 
+    const safeName = path.basename(fullPath);
     const ext = path.extname(safeName).toLowerCase();
     const contentType = HISTORY_STREAM_CONTENT_TYPES[ext] || 'application/octet-stream';
     res.setHeader('Content-Type', contentType);
@@ -480,7 +488,12 @@ async function registerHistoryRoutes(app, historyIndex, fsPromises, downloadDir)
         stream.pipe(res);
       }
     } catch (err) {
-      logger.error('Failed to stream history file', { fileName: safeName, fullPath, error: err.message });
+      logger.error('Failed to stream history file', {
+        historyId,
+        fileName: safeName,
+        fullPath,
+        error: err.message,
+      });
       if (!res.headersSent) {
         res.status(500).end('Error reading file');
       } else {
@@ -490,18 +503,19 @@ async function registerHistoryRoutes(app, historyIndex, fsPromises, downloadDir)
   });
 
   app.delete('/api/history/:fileName', historyFileParamValidation, async (req, res) => {
-    const safeName = path.basename(req.params.fileName || '');
-    if (!safeName) {
+    const historyId = path.basename(req.params.fileName || '');
+    if (!historyId) {
       return res.status(400).json({ error: 'Missing fileName' });
     }
 
-    const fullPath = await resolveHistoryFilePath(fsPromises, historyIndex, downloadDir, safeName);
+    const fullPath = await resolveHistoryFilePath(fsPromises, historyIndex, downloadDir, historyId);
     if (!fullPath) {
-      logger.warn('History delete requested for missing file', { fileName: safeName });
+      logger.warn('History delete requested for missing file', { historyId });
       return res.status(404).json({ error: 'File not found' });
     }
 
     try {
+      const safeName = path.basename(fullPath);
       const activeJobIds = new Set([
         ...collectActiveJobIds(historyIndex),
         ...collectActiveJobIdsFromJobsMap(historyIndex),
@@ -535,13 +549,25 @@ async function registerHistoryRoutes(app, historyIndex, fsPromises, downloadDir)
           }
         }
       } else {
-        const topEntries = await fsPromises.readdir(downloadDir, { withFileTypes: true });
-        const allTopLevelFiles = new Set(
-          topEntries
-            .filter((entry) => entry.isFile())
-            .map((entry) => path.join(downloadDir, entry.name))
-        );
-        const related = buildLegacyRelatedArtifactPaths(fullPath, allTopLevelFiles);
+        let filesInDir = new Set([fullPath]);
+        try {
+          const siblingEntries = await fsPromises.readdir(fileDir, { withFileTypes: true });
+          filesInDir = new Set(
+            siblingEntries
+              .filter((entry) => entry.isFile())
+              .map((entry) => path.join(fileDir, entry.name))
+          );
+          filesInDir.add(fullPath);
+        } catch (err) {
+          if (err && err.code !== 'ENOENT') {
+            logger.warn('Failed to enumerate history file siblings for delete', {
+              fileDir,
+              error: err.message,
+            });
+          }
+        }
+
+        const related = buildLegacyRelatedArtifactPaths(fullPath, filesInDir);
         deleted = await deleteFilePaths(fsPromises, related);
       }
 
@@ -557,10 +583,11 @@ async function registerHistoryRoutes(app, historyIndex, fsPromises, downloadDir)
       if (typeof historyIndex.refreshFromDisk === 'function') {
         await historyIndex.refreshFromDisk({ force: true });
       } else {
-        await historyIndex.removeByFileName(safeName);
+        await historyIndex.removeById(historyId);
       }
 
       logger.info('History file deleted', {
+        historyId,
         fileName: safeName,
         fullPath,
         artifactsDeleted: deleted.length,

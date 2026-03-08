@@ -216,20 +216,37 @@ function getWindowIconPath() {
 }
 
 function resolveHistoryFilePath(fileName) {
-  const safeName = path.basename(String(fileName || ''));
+  const historyId = String(fileName || '').trim();
+  if (!historyId) return null;
+
+  let decodedHistoryId = '';
+  try {
+    const decodedCandidate = Buffer.from(historyId, 'base64url').toString('utf8');
+    decodedHistoryId = Buffer.from(decodedCandidate, 'utf8').toString('base64url') === historyId
+      ? decodedCandidate
+      : '';
+  } catch {
+    decodedHistoryId = '';
+  }
+
+  const safeName = path.basename(decodedHistoryId || historyId);
   if (!safeName) return null;
 
   const downloadDir = getDownloadDirPath();
-  const directPath = path.join(downloadDir, safeName);
-  if (fs.existsSync(directPath)) {
-    return directPath;
-  }
-
   const indexPath = path.join(downloadDir, 'history-index.json');
   try {
     const parsed = JSON.parse(fs.readFileSync(indexPath, 'utf8'));
     const items = Array.isArray(parsed && parsed.items) ? parsed.items : [];
-    const match = items.find((item) => item && item.fileName === safeName);
+    const match = items.find((item) => {
+      if (!item) return false;
+      if (item.id === historyId) return true;
+      if (typeof item.absolutePath === 'string' && item.absolutePath.trim() === decodedHistoryId) return true;
+      const relativePath = typeof item.relativePath === 'string'
+        ? item.relativePath.replace(/\\/g, '/').replace(/^\/+/, '')
+        : '';
+      if (relativePath && relativePath === decodedHistoryId) return true;
+      return item.fileName === safeName;
+    });
     if (match && typeof match.absolutePath === 'string' && match.absolutePath.trim()) {
       const absolutePath = String(match.absolutePath).trim();
       if (fs.existsSync(absolutePath)) {
@@ -247,6 +264,11 @@ function resolveHistoryFilePath(fileName) {
     }
   } catch {
     // Index read failures fall through to filesystem scan.
+  }
+
+  const directPath = path.join(downloadDir, safeName);
+  if (fs.existsSync(directPath)) {
+    return directPath;
   }
 
   const pending = [downloadDir];
@@ -791,13 +813,13 @@ function registerIpc() {
     }
   });
 
-  ipcMain.handle('app:open-history-file', async (event, fileName) => {
+  ipcMain.handle('app:open-history-file', async (event, historyId) => {
     try {
-      const safeName = path.basename(String(fileName || ''));
-      if (!safeName) {
+      const safeHistoryId = String(historyId || '').trim();
+      if (!safeHistoryId) {
         return { ok: false, error: 'Missing file name' };
       }
-      const filePath = resolveHistoryFilePath(safeName);
+      const filePath = resolveHistoryFilePath(safeHistoryId);
       if (!filePath || !fs.existsSync(filePath)) {
         return { ok: false, error: 'File not found' };
       }
@@ -811,13 +833,13 @@ function registerIpc() {
     }
   });
 
-  ipcMain.handle('app:open-history-folder', async (event, fileName) => {
+  ipcMain.handle('app:open-history-folder', async (event, historyId) => {
     try {
-      const safeName = path.basename(String(fileName || ''));
-      if (!safeName) {
+      const safeHistoryId = String(historyId || '').trim();
+      if (!safeHistoryId) {
         return { ok: false, error: 'Missing file name' };
       }
-      const filePath = resolveHistoryFilePath(safeName);
+      const filePath = resolveHistoryFilePath(safeHistoryId);
       if (!filePath || !fs.existsSync(filePath)) {
         return { ok: false, error: 'File not found' };
       }

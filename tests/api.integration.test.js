@@ -826,6 +826,10 @@ test('removing a completed queue item does not remove external history entries',
     assert.ok(historyItemBeforeDelete);
     assert.equal(fs.existsSync(historyItemBeforeDelete.absolutePath), true);
     assert.equal(path.dirname(historyItemBeforeDelete.absolutePath), externalCompletedDir);
+    assert.equal(
+      historyBeforeDelete.data.items.filter((entry) => entry.absolutePath === historyItemBeforeDelete.absolutePath).length,
+      1,
+    );
 
     const deleteRes = await apiFetch(baseUrl, `/api/queue/${jobId}`, {
       method: 'DELETE',
@@ -851,6 +855,85 @@ test('removing a completed queue item does not remove external history entries',
   } finally {
     await apiServer.stop();
     await mediaServer.close();
+  }
+});
+
+test('history items keep unique ids for duplicate basenames and delete resolves the requested file', async () => {
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'm3u8-tests-history-duplicate-ids-'));
+  const port = await getFreePort();
+  const baseUrl = `http://127.0.0.1:${port}`;
+  const downloadDir = path.join(tmpRoot, 'downloads');
+  const externalDir = path.join(tmpRoot, 'external-history');
+  fs.mkdirSync(path.join(downloadDir, 'job-alpha'), { recursive: true });
+  fs.mkdirSync(externalDir, { recursive: true });
+
+  const nestedFile = path.join(downloadDir, 'job-alpha', 'The Dinosaurs (2026) - S01E01.mp4');
+  const externalFile = path.join(externalDir, 'The Dinosaurs (2026) - S01E01.mp4');
+  fs.writeFileSync(nestedFile, Buffer.from('nested-video'));
+  fs.writeFileSync(externalFile, Buffer.from('external-video'));
+
+  const historyIndexPath = path.join(downloadDir, 'history-index.json');
+  fs.writeFileSync(historyIndexPath, JSON.stringify({
+    version: 2,
+    updatedAt: Date.now(),
+    items: [{
+      id: 'legacy-external-id',
+      fileName: path.basename(externalFile),
+      relativePath: path.basename(externalFile),
+      absolutePath: externalFile,
+      label: path.basename(externalFile),
+      jobId: null,
+      title: null,
+      sizeBytes: fs.statSync(externalFile).size,
+      modifiedAt: fs.statSync(externalFile).mtimeMs,
+      ext: '.mp4',
+      thumbnailUrl: null,
+      tmdbReleaseDate: null,
+      tmdbMetadata: null,
+      youtubeMetadata: null,
+    }],
+  }, null, 2), 'utf8');
+
+  const apiServer = await startApi({ dataDir: tmpRoot, port });
+
+  try {
+    const historyRes = await waitFor(async () => {
+      const res = await apiFetch(baseUrl, '/api/history', { includeV1Headers: false });
+      return res.data.items.length >= 2 ? res : false;
+    }, { timeoutMs: 4_000, intervalMs: 120 });
+    assert.equal(historyRes.status, 200);
+
+    const duplicateItems = historyRes.data.items.filter(
+      (entry) => entry.fileName === 'The Dinosaurs (2026) - S01E01.mp4',
+    );
+    assert.equal(duplicateItems.length, 2);
+    assert.equal(new Set(duplicateItems.map((entry) => entry.id)).size, 2);
+
+    const nestedItem = duplicateItems.find((entry) => entry.relativePath === 'job-alpha/The Dinosaurs (2026) - S01E01.mp4');
+    const externalItem = duplicateItems.find((entry) => entry.absolutePath === externalFile);
+    assert.ok(nestedItem);
+    assert.ok(externalItem);
+
+    const deleteRes = await apiFetch(baseUrl, `/api/history/${encodeURIComponent(externalItem.id)}`, {
+      method: 'DELETE',
+      includeV1Headers: false,
+    });
+    assert.equal(deleteRes.status, 200);
+    assert.equal(fs.existsSync(externalFile), false);
+    assert.equal(fs.existsSync(nestedFile), true);
+
+    const afterDeleteRes = await apiFetch(baseUrl, '/api/history', { includeV1Headers: false });
+    assert.equal(afterDeleteRes.status, 200);
+    assert.equal(
+      afterDeleteRes.data.items.some((entry) => entry.absolutePath === externalFile),
+      false,
+    );
+    assert.equal(
+      afterDeleteRes.data.items.some((entry) => entry.relativePath === nestedItem.relativePath),
+      true,
+    );
+  } finally {
+    await apiServer.stop();
   }
 });
 
@@ -1019,7 +1102,12 @@ test('history delete removes related sidecar files and temp directories for the 
       return item.thumbnailUrl === `/downloads/${jobId}/${jobId}-thumb.jpg` ? true : false;
     }, { timeoutMs: 4000, intervalMs: 120 });
 
-    const deleteRes = await apiFetch(baseUrl, `/api/history/${encodeURIComponent(targetFile)}`, {
+    const historyBeforeDelete = await apiFetch(baseUrl, '/api/history', { includeV1Headers: false });
+    assert.equal(historyBeforeDelete.status, 200);
+    const targetItem = historyBeforeDelete.data.items.find((entry) => entry.fileName === targetFile);
+    assert.ok(targetItem);
+
+    const deleteRes = await apiFetch(baseUrl, `/api/history/${encodeURIComponent(targetItem.id)}`, {
       method: 'DELETE',
       includeV1Headers: false,
     });

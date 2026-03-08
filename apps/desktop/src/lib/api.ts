@@ -48,8 +48,8 @@ export function createApiClient(baseUrl: string) {
     // History
     getHistory: () => req<{ items: HistoryItem[] }>('/api/history'),
     clearHistory: () => req('/api/history', { method: 'DELETE' }),
-    deleteHistoryItem: (fileName: string) =>
-      req(`/api/history/${encodeURIComponent(fileName)}`, { method: 'DELETE' }),
+    deleteHistoryItem: (historyId: string) =>
+      req(`/api/history/${encodeURIComponent(historyId)}`, { method: 'DELETE' }),
 
     // Health
     getHealth: () =>

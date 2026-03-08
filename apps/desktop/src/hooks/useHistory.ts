@@ -161,15 +161,15 @@ export function useHistory(apiBase: string) {
     toast.success('History cleared');
   }, [api, loadHistory]);
 
-  const deleteItem = useCallback(async (fileName: string) => {
-    await api.deleteHistoryItem(fileName);
+  const deleteItem = useCallback(async (item: HistoryItem) => {
+    await api.deleteHistoryItem(item.id);
     await loadHistory();
-    toast.success(`Deleted ${fileName}`);
+    toast.success(`Deleted ${item.fileName}`);
   }, [api, loadHistory]);
 
-  const openFile = useCallback(async (fileName: string) => {
+  const openFile = useCallback(async (item: HistoryItem) => {
     try {
-      const result = await window.desktop.openHistoryFile(fileName);
+      const result = await window.desktop.openHistoryFile(item.id);
       if (!result?.ok) throw new Error(result?.error || 'Failed to open file');
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
@@ -177,9 +177,9 @@ export function useHistory(apiBase: string) {
     }
   }, []);
 
-  const openFolder = useCallback(async (fileName: string) => {
+  const openFolder = useCallback(async (item: HistoryItem) => {
     try {
-      const result = await window.desktop.openHistoryFolder(fileName);
+      const result = await window.desktop.openHistoryFolder(item.id);
       if (!result?.ok) throw new Error(result?.error || 'Failed to open folder');
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);

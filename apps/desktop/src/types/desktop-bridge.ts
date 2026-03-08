@@ -20,8 +20,8 @@ export interface DesktopBridge {
   saveDiagnosticsFile(payload: unknown): Promise<{ ok: boolean; filePath?: string; error?: string }>;
   openDiagnosticsFolder(): Promise<{ ok: boolean; folderPath?: string; error?: string }>;
   exportSupportBundle(payload: unknown): Promise<{ ok: boolean; bundlePath?: string; error?: string }>;
-  openHistoryFile(fileName: string): Promise<{ ok: boolean; error?: string }>;
-  openHistoryFolder(fileName: string): Promise<{ ok: boolean; error?: string }>;
+  openHistoryFile(historyId: string): Promise<{ ok: boolean; error?: string }>;
+  openHistoryFolder(historyId: string): Promise<{ ok: boolean; error?: string }>;
   onUpdaterEvent(cb: (event: UpdaterState) => void): () => void;
 }
 

@@ -23,7 +23,7 @@ export function HistoryView({ apiBase }: HistoryViewProps) {
         {history.visibleItems.length > 0 ? (
           history.visibleItems.map((item) => (
             <HistoryItemCard
-              key={item.id}
+              key={item.absolutePath || item.relativePath || item.id}
               item={item}
               apiBase={apiBase}
               onOpenFile={history.openFile}

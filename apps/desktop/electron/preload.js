@@ -12,8 +12,8 @@ contextBridge.exposeInMainWorld('desktop', {
   saveDiagnosticsFile: (payload) => ipcRenderer.invoke('app:save-diagnostics-file', payload),
   openDiagnosticsFolder: () => ipcRenderer.invoke('app:open-diagnostics-folder'),
   exportSupportBundle: (payload) => ipcRenderer.invoke('app:export-support-bundle', payload),
-  openHistoryFile: (fileName) => ipcRenderer.invoke('app:open-history-file', fileName),
-  openHistoryFolder: (fileName) => ipcRenderer.invoke('app:open-history-folder', fileName),
+  openHistoryFile: (historyId) => ipcRenderer.invoke('app:open-history-file', historyId),
+  openHistoryFolder: (historyId) => ipcRenderer.invoke('app:open-history-folder', historyId),
   onUpdaterEvent: (cb) => {
     const handler = (_event, payload) => cb(payload);
     ipcRenderer.on('updater:event', handler);
