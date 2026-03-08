@@ -1244,6 +1244,82 @@ test('history serves external thumbnail sidecars from the configured output dire
   }
 });
 
+test('history delete removes external completed folder and thumbnail sidecar', async () => {
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'm3u8-tests-history-delete-external-'));
+  const port = await getFreePort();
+  const baseUrl = `http://127.0.0.1:${port}`;
+  const downloadDir = path.join(tmpRoot, 'downloads');
+  const externalCompletedDir = path.join(tmpRoot, 'external-output');
+  const itemDir = path.join(externalCompletedDir, 'Movie');
+  fs.mkdirSync(downloadDir, { recursive: true });
+  fs.mkdirSync(itemDir, { recursive: true });
+
+  const jobId = 'job-external-delete';
+  const mediaPath = path.join(itemDir, 'Movie.mp4');
+  const thumbPath = path.join(itemDir, `${jobId}-thumb.jpg`);
+  fs.writeFileSync(mediaPath, Buffer.from('video'));
+  fs.writeFileSync(thumbPath, Buffer.from([0xff, 0xd8, 0xff, 0xd9]));
+
+  const queueFilePath = path.join(downloadDir, 'queue.json');
+  fs.writeFileSync(queueFilePath, JSON.stringify({
+    queue: [{
+      id: jobId,
+      title: 'Movie',
+      filePath: mediaPath,
+      mp4Path: mediaPath,
+      storageDir: itemDir,
+      thumbnailPath: thumbPath,
+      thumbnailPaths: [thumbPath],
+      downloadName: path.basename(mediaPath),
+      downloadNameMp4: path.basename(mediaPath),
+      status: 'completed',
+      queueStatus: 'completed',
+      completedAt: Date.now(),
+      updatedAt: Date.now(),
+    }],
+    settings: {
+      maxConcurrent: 1,
+      autoStart: true,
+    },
+  }, null, 2), 'utf8');
+
+  const apiServer = await startApi({
+    dataDir: tmpRoot,
+    port,
+    getCompletedOutputDir: () => externalCompletedDir,
+  });
+
+  try {
+    const historyRes = await waitFor(async () => {
+      const result = await apiFetch(baseUrl, '/api/history', { includeV1Headers: false });
+      const item = result.data.items.find((entry) => entry.jobId === jobId);
+      return item ? result : false;
+    }, { timeoutMs: 4000, intervalMs: 120 });
+    assert.equal(historyRes.status, 200);
+    const targetItem = historyRes.data.items.find((entry) => entry.jobId === jobId);
+    assert.ok(targetItem);
+
+    const deleteRes = await apiFetch(baseUrl, `/api/history/${encodeURIComponent(targetItem.id)}`, {
+      method: 'DELETE',
+      includeV1Headers: false,
+    });
+    assert.equal(deleteRes.status, 200);
+
+    assert.equal(fs.existsSync(mediaPath), false, 'expected external media file to be removed');
+    assert.equal(fs.existsSync(thumbPath), false, 'expected external thumbnail to be removed');
+    assert.equal(fs.existsSync(itemDir), false, 'expected external completed folder to be removed');
+
+    const historyAfterDelete = await apiFetch(baseUrl, '/api/history', { includeV1Headers: false });
+    assert.equal(historyAfterDelete.status, 200);
+    assert.equal(
+      historyAfterDelete.data.items.some((entry) => entry.jobId === jobId),
+      false,
+    );
+  } finally {
+    await apiServer.stop();
+  }
+});
+
 test('history items keep unique ids for duplicate basenames and delete resolves the requested file', async () => {
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'm3u8-tests-history-duplicate-ids-'));
   const port = await getFreePort();

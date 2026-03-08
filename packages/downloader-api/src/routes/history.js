@@ -217,9 +217,9 @@ async function resolveHistoryFilePath(fsPromises, historyIndex, downloadDir, his
   }
 }
 
-function buildLegacyRelatedArtifactPaths(primaryFilePath, allFilePaths) {
+function buildLegacyRelatedArtifactPaths(primaryFilePath, allFilePaths, jobIdOverride = null) {
   const related = new Set([primaryFilePath, `${primaryFilePath}.part`]);
-  const jobId = extractJobIdFromArtifactName(path.basename(primaryFilePath));
+  const jobId = String(jobIdOverride || extractJobIdFromArtifactName(path.basename(primaryFilePath)) || '').trim();
   if (!jobId) {
     return Array.from(related).filter((candidate) => allFilePaths.has(candidate));
   }
@@ -508,6 +508,9 @@ async function registerHistoryRoutes(app, historyIndex, fsPromises, downloadDir)
       return res.status(400).json({ error: 'Missing fileName' });
     }
 
+    const historyItem = typeof historyIndex.findById === 'function'
+      ? historyIndex.findById(historyId)
+      : null;
     const fullPath = await resolveHistoryFilePath(fsPromises, historyIndex, downloadDir, historyId);
     if (!fullPath) {
       logger.warn('History delete requested for missing file', { historyId });
@@ -520,7 +523,11 @@ async function registerHistoryRoutes(app, historyIndex, fsPromises, downloadDir)
         ...collectActiveJobIds(historyIndex),
         ...collectActiveJobIdsFromJobsMap(historyIndex),
       ]);
-      const jobId = extractJobIdFromArtifactName(safeName);
+      const jobId = String(
+        (historyItem && historyItem.jobId)
+        || extractJobIdFromArtifactName(safeName)
+        || ''
+      ).trim();
       const fileDir = path.dirname(fullPath);
       const isNestedJobDir = (
         fileDir !== downloadDir
@@ -567,8 +574,22 @@ async function registerHistoryRoutes(app, historyIndex, fsPromises, downloadDir)
           }
         }
 
-        const related = buildLegacyRelatedArtifactPaths(fullPath, filesInDir);
+        const related = buildLegacyRelatedArtifactPaths(fullPath, filesInDir, jobId);
         deleted = await deleteFilePaths(fsPromises, related);
+
+        try {
+          const remaining = await fsPromises.readdir(fileDir);
+          if (remaining.length === 0) {
+            await fsPromises.rmdir(fileDir);
+          }
+        } catch (err) {
+          if (err && err.code !== 'ENOENT') {
+            logger.warn('Failed to remove empty history parent directory', {
+              fileDir,
+              error: err.message,
+            });
+          }
+        }
       }
 
       const deletedJobIds = new Set(
@@ -576,6 +597,9 @@ async function registerHistoryRoutes(app, historyIndex, fsPromises, downloadDir)
           .map((deletedPath) => extractJobIdFromArtifactName(path.basename(deletedPath)))
           .filter(Boolean)
       );
+      if (jobId) {
+        deletedJobIds.add(jobId);
+      }
       await deleteTempDirectoriesForJobIds(fsPromises, downloadDir, deletedJobIds);
       await deleteOrphanTempDirectories(fsPromises, downloadDir, activeJobIds);
       await removeEmptyDirectories(fsPromises, downloadDir);
