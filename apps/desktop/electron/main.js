@@ -230,6 +230,12 @@ function resolveHistoryFilePath(fileName) {
     const parsed = JSON.parse(fs.readFileSync(indexPath, 'utf8'));
     const items = Array.isArray(parsed && parsed.items) ? parsed.items : [];
     const match = items.find((item) => item && item.fileName === safeName);
+    if (match && typeof match.absolutePath === 'string' && match.absolutePath.trim()) {
+      const absolutePath = String(match.absolutePath).trim();
+      if (fs.existsSync(absolutePath)) {
+        return absolutePath;
+      }
+    }
     if (match && typeof match.relativePath === 'string') {
       const normalizedRelative = String(match.relativePath).replace(/\\/g, '/').replace(/^\/+/, '');
       if (!normalizedRelative.includes('..') && !normalizedRelative.includes('\0')) {

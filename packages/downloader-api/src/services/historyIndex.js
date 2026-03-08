@@ -285,6 +285,7 @@ class HistoryIndexService {
           fileName: path.basename(candidatePath),
           dirRelative: '',
           stat,
+          job,
         });
       } catch {
         continue;
@@ -355,12 +356,14 @@ class HistoryIndexService {
     const validJobId = extractedJobId && isValidHistoryJobId(extractedJobId)
       ? extractedJobId
       : null;
-    const job = jobLookup.get(relativePath)
+    const job = mediaFile.job
+      || jobLookup.get(relativePath)
       || (validJobId ? this.jobs.get(validJobId) : null)
       || null;
+    const resolvedJobId = (job && job.id) || validJobId || null;
 
-    if (validJobId) {
-      const associatedJob = this.jobs.get(validJobId) || job;
+    if (resolvedJobId) {
+      const associatedJob = this.jobs.get(resolvedJobId) || job;
       if (associatedJob) {
         const associatedStatus = String(associatedJob.queueStatus || associatedJob.status || '').trim();
         if (associatedStatus && !TERMINAL_STATUSES.has(associatedStatus)) {
@@ -370,7 +373,7 @@ class HistoryIndexService {
     }
 
     const thumbnailUrl = this.findThumbnailUrl({
-      validJobId,
+      validJobId: resolvedJobId,
       dirAbsolute,
       dirRelative,
       job,
@@ -382,7 +385,7 @@ class HistoryIndexService {
       relativePath,
       absolutePath: mediaFile.absolutePath || mediaFile.fullPath,
       label: deriveLabel(fileName),
-      jobId: validJobId,
+      jobId: resolvedJobId,
       title: (job && job.title) || null,
       sizeBytes: Number(mediaFile.stat.size || 0),
       modifiedAt: Number(mediaFile.stat.mtimeMs || Date.now()),

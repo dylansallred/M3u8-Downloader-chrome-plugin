@@ -3,7 +3,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
-import { FileVideo, FolderOpen, ExternalLink, Play, Trash2 } from 'lucide-react';
+import { FileVideo, FolderOpen, Play, MonitorPlay, Trash2 } from 'lucide-react';
 import type { HistoryItem } from '@/types/history';
 import { resolveThumbnailUrl, extractYear } from '@/lib/utils';
 
@@ -60,12 +60,6 @@ export function HistoryItemCard({ item, apiBase, onOpenFile, onOpenFolder, onDel
             </div>
           )}
           <div className="flex items-center gap-1.5">
-            {item.jobId && (
-              <span className="text-[10px] text-foreground-subtle font-mono">{item.jobId}</span>
-            )}
-            {item.jobId && (hasMetaLine || sizeMb > 0) && (
-              <span className="text-[10px] text-foreground-subtle">&middot;</span>
-            )}
             {year && <span className="text-[10px] text-foreground-muted">{year}</span>}
             {year && genres.length > 0 && <span className="text-[10px] text-foreground-subtle">&middot;</span>}
             {genres.map((g) => (
@@ -80,7 +74,7 @@ export function HistoryItemCard({ item, apiBase, onOpenFile, onOpenFolder, onDel
 
         <div className="flex items-center shrink-0 pr-2 gap-0.5">
           {ext && (
-            <Badge variant="outline" className="text-[10px] font-normal border-border text-foreground-muted shrink-0 mr-1">
+            <Badge variant="outline" className="text-[10px] font-normal border-status-downloading/30 bg-status-downloading/10 text-status-downloading shrink-0 mr-1">
               {ext}
             </Badge>
           )}
@@ -90,7 +84,7 @@ export function HistoryItemCard({ item, apiBase, onOpenFile, onOpenFolder, onDel
             title="Open File"
             onClick={() => onOpenFile(item.fileName)}
           >
-            <ExternalLink className="size-3.5" />
+            <Play className="size-3.5" />
           </Button>
           <Button
             size="icon-sm"
@@ -111,7 +105,7 @@ export function HistoryItemCard({ item, apiBase, onOpenFile, onOpenFolder, onDel
               target="_blank"
               rel="noreferrer"
             >
-              <Play className="size-3.5" />
+              <MonitorPlay className="size-3.5" />
             </a>
           </Button>
           <Button
