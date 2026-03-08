@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
+  buildHlsRequestHeaders,
   buildFfmpegHeaderBlob,
   buildNativeHlsArgs,
   inspectHlsPlaylist,
@@ -73,5 +74,19 @@ test('buildNativeHlsArgs forwards headers and uses ffmpeg native HLS demuxing op
   });
   assert.ok(headerBlob.includes('Authorization: Bearer abc'));
   assert.ok(headerBlob.includes('Referer: https://site.example/watch'));
+  assert.ok(headerBlob.includes('Cache-Control: no-cache'));
+  assert.ok(headerBlob.includes('Pragma: no-cache'));
   assert.equal(headerBlob.includes('Host:'), false);
+});
+
+test('buildHlsRequestHeaders forces anti-cache headers while preserving caller headers', () => {
+  const headers = buildHlsRequestHeaders({
+    Authorization: 'Bearer abc',
+    Referer: 'https://site.example/watch',
+  });
+
+  assert.equal(headers.Authorization, 'Bearer abc');
+  assert.equal(headers.Referer, 'https://site.example/watch');
+  assert.equal(headers['Cache-Control'], 'no-cache');
+  assert.equal(headers.Pragma, 'no-cache');
 });

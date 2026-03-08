@@ -1,6 +1,21 @@
 const { URL } = require('url');
 const { buildFfmpegMetadataArgs } = require('../utils/mediaTags');
 
+function buildHlsRequestHeaders(headers = {}) {
+  const normalized = {};
+  for (const [rawKey, rawValue] of Object.entries(headers || {})) {
+    const key = String(rawKey || '').trim();
+    const value = String(rawValue || '').trim();
+    if (!key || !value) continue;
+    normalized[key] = value;
+  }
+
+  // Force revalidation for HLS playlists/segments to avoid stale CDN or proxy cache hits.
+  normalized['Cache-Control'] = 'no-cache';
+  normalized.Pragma = 'no-cache';
+  return normalized;
+}
+
 function inspectHlsPlaylist(playlistText, playlistUrl) {
   const lines = String(playlistText || '').split(/\r?\n/);
   const segments = [];
@@ -96,7 +111,7 @@ function buildFfmpegHeaderBlob(headers = {}) {
   ]);
 
   const entries = [];
-  for (const [rawKey, rawValue] of Object.entries(headers || {})) {
+  for (const [rawKey, rawValue] of Object.entries(buildHlsRequestHeaders(headers))) {
     const key = String(rawKey || '').trim();
     const value = String(rawValue || '').trim();
     if (!key || !value) continue;
@@ -145,6 +160,7 @@ function buildNativeHlsArgs({ job, playlistUrl, outputPath, headers }) {
 }
 
 module.exports = {
+  buildHlsRequestHeaders,
   inspectHlsPlaylist,
   shouldPreferNativeHlsDownload,
   buildFfmpegHeaderBlob,

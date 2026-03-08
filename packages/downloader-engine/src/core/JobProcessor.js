@@ -3,7 +3,12 @@ const path = require('path');
 const { spawn, spawnSync } = require('child_process');
 const { fetchText, parseM3U8, requestWithRedirects } = require('./PlaylistUtils');
 const { getRetryBackoffMs, downloadSegment } = require('./SegmentDownloader');
-const { buildNativeHlsArgs, inspectHlsPlaylist, shouldPreferNativeHlsDownload } = require('./HlsNativeDownload');
+const {
+  buildHlsRequestHeaders,
+  buildNativeHlsArgs,
+  inspectHlsPlaylist,
+  shouldPreferNativeHlsDownload,
+} = require('./HlsNativeDownload');
 const { generateThumbnailFromMp4, remuxAndGenerateThumbnails } = require('./VideoConverter');
 const logger = require('../utils/logger');
 
@@ -1253,7 +1258,7 @@ function createJobProcessor({
         await fsPromises.mkdir(path.dirname(job.filePath), { recursive: true });
       }
 
-      const headers = job.headers || {};
+      const headers = buildHlsRequestHeaders(job.headers || {});
       const { text: playlistText, finalUrl: playlistUrl } = await fetchText(job.url, headers);
       const playlistInfo = inspectHlsPlaylist(playlistText, playlistUrl || job.url);
       const segments = playlistInfo.segments.length > 0
@@ -1349,11 +1354,19 @@ function createJobProcessor({
             })
           );
           if (existingSegments.size > 0) {
-            console.log(`Found ${existingSegments.size} existing segments for job ${job.id}, resuming...`);
+            logger.info('Resuming HLS job from existing local segments', {
+              jobId: job.id,
+              existingSegments: existingSegments.size,
+            });
           }
         } catch (err) {
           console.warn('Error checking for existing segments:', err.message);
         }
+      } else {
+        logger.info('Starting HLS job with a clean temp segment directory', {
+          jobId: job.id,
+          tempDir: jobTempDir,
+        });
       }
 
       // Track how many times each segment has been attempted in total.
